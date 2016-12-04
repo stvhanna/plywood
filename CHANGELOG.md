@@ -2,6 +2,10 @@
 
 For updates follow [@implydata](https://twitter.com/implydata) on Twitter.
 
+## 0.16.1
+
+- Use has-own-prop library
+
 ## 0.15.7
 
 - Added timezone based formatting ability
