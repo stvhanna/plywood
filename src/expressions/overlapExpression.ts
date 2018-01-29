@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2016 Imply Data, Inc.
+ * Copyright 2016-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
-import { r, ExpressionJS, ExpressionValue, Expression, ChainableUnaryExpression } from './baseExpression';
-import { PlywoodValue } from '../datatypes/index';
-import { wrapSetType } from '../datatypes/common';
-import { Set } from '../datatypes/set';
+import { NumberRange, PlywoodRange, PlywoodValue, Range, Set, StringRange, TimeRange } from '../datatypes/index';
+import { SQLDialect } from '../dialect/baseDialect';
+import { ChainableUnaryExpression, Expression, ExpressionJS, ExpressionValue, r } from './baseExpression';
+import { IndexOfExpression } from './indexOfExpression';
+import { LiteralExpression } from './literalExpression';
 
 export class OverlapExpression extends ChainableUnaryExpression {
   static op = "Overlap";
@@ -28,24 +29,82 @@ export class OverlapExpression extends ChainableUnaryExpression {
   constructor(parameters: ExpressionValue) {
     super(parameters, dummyObject);
     this._ensureOp("overlap");
-    if (!this.expression.canHaveType('SET')) {
-      throw new Error(`${this.op} must have an expression of type SET (is: ${this.expression.type})`);
+    let operandType = Range.unwrapRangeType(Set.unwrapSetType(this.operand.type));
+    let expressionType = Range.unwrapRangeType(Set.unwrapSetType(this.expression.type));
+    if (!(!operandType || operandType === 'NULL' || !expressionType || expressionType === 'NULL' || operandType === expressionType)) {
+      throw new Error(`${this.op} must have matching types (are ${this.operand.type}, ${this.expression.type})`);
     }
-
-    let oType = this.operand.type;
-    let eType = this.expression.type;
-    if (oType && eType && oType !== 'NULL' && oType !== 'SET/NULL' && eType !== 'NULL' && eType !== 'SET/NULL') {
-      if (wrapSetType(oType) !== wrapSetType(eType)) {
-        throw new Error(`overlap expression has type mismatch between ${oType} and ${eType}`);
-      }
-    }
-
     this.type = 'BOOLEAN';
   }
 
   protected _calcChainableUnaryHelper(operandValue: any, expressionValue: any): PlywoodValue {
-    if (expressionValue == null) return null;
-    return operandValue instanceof Set ? operandValue.overlap(expressionValue) : expressionValue.contains(operandValue);
+    return Set.crossBinaryBoolean(operandValue, expressionValue, (a, b) => {
+      if (a instanceof Range) {
+        return b instanceof Range ? a.intersects(b) : a.containsValue(b);
+      } else {
+        return b instanceof Range ? b.containsValue(a) : a === b;
+      }
+    });
+  }
+
+  protected _getJSChainableUnaryHelper(operandJS: string, expressionJS: string): string {
+    const { expression } = this;
+    if (expression instanceof LiteralExpression) {
+      if (Range.isRangeType(expression.type)) {
+        let range: PlywoodRange = expression.value;
+        let r0 = range.start;
+        let r1 = range.end;
+        let bounds = range.bounds;
+
+        let cmpStrings: string[] = [];
+        if (r0 != null) {
+          cmpStrings.push(`${JSON.stringify(r0)}${bounds[0] === '(' ? '<' : '<='}_`);
+        }
+        if (r1 != null) {
+          cmpStrings.push(`_${bounds[1] === ')' ? '<' : '<='}${JSON.stringify(r1)}`);
+        }
+
+        return `((_=${operandJS}),${cmpStrings.join('&&')})`;
+      } else {
+        throw new Error(`can not convert ${this} to JS function, unsupported type ${expression.type}`);
+      }
+    }
+
+    throw new Error(`can not convert ${this} to JS function`);
+  }
+
+  protected _getSQLChainableUnaryHelper(dialect: SQLDialect, operandSQL: string, expressionSQL: string): string {
+    let expression = this.expression;
+    let expressionType = expression.type;
+    switch (expressionType) {
+      case 'NUMBER_RANGE':
+      case 'TIME_RANGE':
+        if (expression instanceof LiteralExpression) {
+          let range: (NumberRange | TimeRange) = expression.value;
+          return dialect.inExpression(operandSQL, dialect.numberOrTimeToSQL(range.start), dialect.numberOrTimeToSQL(range.end), range.bounds);
+        }
+        throw new Error(`can not convert action to SQL ${this}`);
+
+      case 'STRING_RANGE':
+        if (expression instanceof LiteralExpression) {
+          let stringRange: StringRange = expression.value;
+          return dialect.inExpression(operandSQL, dialect.escapeLiteral(stringRange.start), dialect.escapeLiteral(stringRange.end), stringRange.bounds);
+        }
+        throw new Error(`can not convert action to SQL ${this}`);
+
+      case 'SET/NUMBER_RANGE':
+      case 'SET/TIME_RANGE':
+        if (expression instanceof LiteralExpression) {
+          let setOfRange: Set = expression.value;
+          return setOfRange.elements.map((range: (NumberRange | TimeRange)) => {
+            return dialect.inExpression(operandSQL, dialect.numberOrTimeToSQL(range.start), dialect.numberOrTimeToSQL(range.end), range.bounds);
+          }).join(' OR ');
+        }
+        throw new Error(`can not convert action to SQL ${this}`);
+
+      default:
+        throw new Error(`can not convert action to SQL ${this}`);
+    }
   }
 
   public isCommutative(): boolean {
@@ -55,11 +114,30 @@ export class OverlapExpression extends ChainableUnaryExpression {
   protected specialSimplify(): Expression {
     const { operand, expression } = this;
 
-    // X.overlap({})
-    if (expression.equals(Expression.EMPTY_SET)) return Expression.FALSE;
+    const literalValue = expression.getLiteralValue();
+    if (literalValue instanceof Set) {
+      // X.overlap({})
+      if (literalValue.empty()) return Expression.FALSE;
 
-    // 5.overlap({5})
-    if ('SET/' + operand.type === expression.type) return operand.in(expression);
+      const simpleSet = literalValue.simplifyCover();
+      if (simpleSet !== literalValue) {
+        return operand.overlap(r(simpleSet));
+      }
+    }
+
+    // NonRange.overlap(NonRange)
+    if (!Range.isRangeType(operand.type) && !Range.isRangeType(expression.type)) return operand.is(expression);
+
+    // X.indexOf(Y).overlap([start, end])
+    if (operand instanceof IndexOfExpression && literalValue instanceof NumberRange) {
+      const { operand: x, expression: y } = operand;
+      const { start, end, bounds } = literalValue;
+
+      // contains could be either start less than 0 or start === 0 with inclusive bounds
+      if ((start < 0 && end === null) || (start === 0 && end === null && bounds[0] === '[')) {
+        return x.contains(y);
+      }
+    }
 
     return this;
   }

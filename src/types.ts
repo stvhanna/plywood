@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2016 Imply Data, Inc.
+ * Copyright 2016-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ export interface SimpleFullType {
 
 export interface DatasetFullType {
   type: 'DATASET';
-  datasetType: Lookup<FullType>;
+  datasetType: Record<string, FullType>;
   parent?: DatasetFullType;
 }
 

@@ -2,7 +2,174 @@
 
 For updates follow [@implydata](https://twitter.com/implydata) on Twitter.
 
-## 0.15.8
+## 0.17.26
+
+- Fix `Set#isAtomicType` to work correctly for `NULL`
+
+## 0.17.25
+
+- Respect filtered aggregations for quantile and custom aggregates
+
+## 0.17.24
+
+- Allow `maxRows` and support dataset trimming
+
+## 0.17.23
+
+- Now setting `outputType` in Druid dimension specs
+
+## 0.17.22
+
+- Updated tests for Druid 0.11.0
+- Added and enabled previously skipped tests
+- Fixed bug where `Set(null)` and `Set("null")` would be subsets of each other
+
+## 0.17.21
+
+- Added `round: true` to cardinality
+
+## 0.17.20
+
+- Fixed issue with milti-value list filter
+
+## 0.17.19
+
+- Fixed planning for nested JS postagg
+- Fixed tests
+
+## 0.17.18
+
+- Updated dependencies
+- `TimeRangeExpression.getQualifiedDurationDescription` now accepts a capitalization flag
+- Testing with newer Druid
+- Support Druid `DOUBLE` types
+
+## 0.17.17
+
+- Allow deep introspection
+- Move away from any-promise towards native promises
+
+## 0.17.16
+
+- Fix bug in several PlyQL functions where string inputs were interpreted as plywood expressions leading to errors on values with spaces
+
+## 0.17.15
+
+- Fix bug in `LOCATE`
+
+## 0.17.14
+
+- Fix bug in `.cast("NUMBER")`
+- Change tests to work with node8
+- Updated examples
+
+## 0.17.13
+
+- Add engine property to `rawQueries`
+
+## 0.17.12
+
+- Allow `rawQueries` collection for externals
+
+## 0.17.11
+
+- Fix bug in formula parsing related to tuning
+- Added tuning support to PlyQL
+
+## 0.17.10
+
+- Add support for a `tuning` config for Druid approximate histograms
+- Add support for a finalizing postAgg for a custom aggregation
+- Replaced TS `Lookup<T>` type with the TS2.2 native `Record<string, T>`
+
+## 0.17.9
+
+- Fix typos
+- Add `AttributeInfo#changeType`
+- Fix to DSV in dataset for NULL type columns
+
+## 0.17.8
+
+- Changed the meaning of IN to be a subset only operation with back compat provisions.
+- Better build process for people with older npm
+- `keys` not emitted if empty for `Dataset#toJS`
+- `Set#simplify` => `Set#simplifyCover`
+- `Set#generalUnion` => `Set#unionCover`
+- `Set#generalIntersect` => `Set#intersectCover`
+- Fixed SQL externals for filtered `Min` and `Max` aggregations
+- Fixed an instance of unhanded error in pipe
+- Simplification for case independent contains
+- Allow `table_alias.*` in PlyQL
+- Support new features added on Druid 0.10.0
+- Allow approxHistogram calculation on numeric columns
+- verboseRequesterFactory parameter `preQuery` renamed to `onQuery`
+- verboseRequesterFactory callback parameters now get a single argument with lots of info
+- verboseRequesterFactory will now name queries
+
+
+## 0.16.5
+
+- PlyQL: support for `IF()` `CASE WHEN THEN END`, and `NULLIF()`
+
+## 0.16.4
+
+- `DruidExternal` fixed some problems with JS code generation
+- `DruidExternal` support for planning `.then().fallback()`
+
+## 0.16.3
+
+- `DruidExternal` GroupBys will not correctly use 'numeric' order
+- `DruidExternal` fixed GroupBy output name
+
+## 0.16.2
+
+- Stable release
+
+## 0.16.1
+
+**Major breaking changes in this release**
+
+- Druid: Allow count distinct on cross product (e.g. `$data.countDistinct($a ++ $b)`)
+- Transition to TS 2.1
+- Better division by 0 handling
+- Extracted Requester type definition into `plywood-base-api`
+- Switched from `Q` to `any-promise`
+- Use has-own-prop library
+- Changed `Dataset#toJS` to return an object rather than just the `data` array
+- Datasets now actively maintain their `keys` array
+- `Dataset#flatten` now returns a new (flat) `Dataset` and thus the `parentName` option is no longer supported
+- In `Dataset#flatten`, `Dataset#ToCSV`, e.t.c `orderedColumns` option is no longer supported use `.select()` instead
+- Added `columnOrdering` option to `Dataset#flatten` with values `'as-seen'` and  `'keys-first'`
+- `Dataset#getColumns` is now just `return this.flatten(options).attributes`
+- `Dataset#getNestedColumns` was removed
+- Added `ThenExpression`
+- Expressions have all been standardized to apply to Sets as well as atomics
+- Fix `NULL` types handling everywhere
+- Remove `AttributeInfo#serialize`
+- Removed `AttributeInfo#special`, `UniqueAttributeInfo`, `ThetaAttributeInfo`, and `HistogramAttributeInfo`
+- Added `AttributeInfo.nativeType` that stores the original database type of the attribute
+- `DruidExernal` will now be able to plan using `longSum`
+- `DruidExernal` added ability to split on constant
+- Removed deprecation warnings and deleted crutches from the 0.15 release
+- `MinExpression` and `MaxExpression` will now correctly output their type as `TIME` if the argument is `TIME`
+- Experimental support for DruidSQL
+- `DruidExternal` correctly defining numeric ordering in topN metricsSpecs
+- `DruidExternal` will now explicitly set `fromNext: false` when paginating select
+
+
+## 0.15.13
+
+- Fixed bug where bucketing in a multi-value dimension was off for non UTC timezones
+
+## 0.15.12
+
+- Version check now works with all parts of the version
+
+## 0.15.11
+
+- Fix error in version check that had trouble with versions like `0.10.0`
+
+## 0.15.10
 
 - PlyQL: Support for `SHOW CHARACTER SET`
 - PlyQL: Support for `SHOW COLLATION`

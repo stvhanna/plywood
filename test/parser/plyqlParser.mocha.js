@@ -1,6 +1,6 @@
 /*
  * Copyright 2012-2015 Metamarkets Group Inc.
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,13 @@
  * limitations under the License.
  */
 
-let { expect } = require("chai");
+const { expect } = require("chai");
 let { sane } = require('../utils');
 
 let { Timezone } = require('chronoshift');
 
 let plywood = require('../plywood');
-let { Expression, i$, $, ply, r, Set, Dataset, External, ExternalExpression } = plywood;
+let { Expression, i$, $, ply, r, Set } = plywood;
 
 function resolvesProperly(parse) {
   let resolveString = parse.expression.resolve({ t: 'STR' });
@@ -181,7 +181,7 @@ describe("SQL parser", () => {
     it("works with IN expression (value list)", () => {
       let parse = Expression.parseSQL("language IN ( 'ca', 'cs', 'da', 'el' )");
 
-      let ex2 = i$('language').in(['ca', 'cs', 'da', 'el']);
+      let ex2 = i$('language').is(['ca', 'cs', 'da', 'el']);
 
       expect(parse.verb).to.equal(null);
       expect(parse.expression.toJS()).to.deep.equal(ex2.toJS());
@@ -190,7 +190,7 @@ describe("SQL parser", () => {
     it("works with IN expression (list literal)", () => {
       let parse = Expression.parseSQL("language IN { 'ca', 'cs', 'da', 'el' }");
 
-      let ex2 = i$('language').in(['ca', 'cs', 'da', 'el']);
+      let ex2 = i$('language').is(['ca', 'cs', 'da', 'el']);
 
       expect(parse.verb).to.equal(null);
       expect(parse.expression.toJS()).to.deep.equal(ex2.toJS());
@@ -199,7 +199,7 @@ describe("SQL parser", () => {
     it("works with IN expression (variable)", () => {
       let parse = Expression.parseSQL("language IN languages");
 
-      let ex2 = i$('language').in('i$languages');
+      let ex2 = i$('language').is('i$languages');
 
       expect(parse.verb).to.equal(null);
       expect(parse.expression.toJS()).to.deep.equal(ex2.toJS());
@@ -214,21 +214,25 @@ describe("SQL parser", () => {
       expect(parse.expression.toJS()).to.deep.equal(ex2.toJS());
     });
 
-    it("should handle fallback --", () => {
+    it("should handle fallback", () => {
       let parse = Expression.parseSQL("IFNULL(null,'fallback')");
       let parse2 = Expression.parseSQL("IFNULL(null, SUM(deleted))");
       let parse3 = Expression.parseSQL("IFNULL(SUM(`added`), SUM(deleted))");
       let parse4 = Expression.parseSQL("FALLBACK(SUM(`added`), SUM(deleted))");
+      let parse5 = Expression.parseSQL("FALLBACK(`added`, 'lol lol')");
 
       let ex = r(null).fallback('fallback');
       let ex2 = r(null).fallback('$data.sum(i$deleted)');
       let ex3 = $data.sum('i$added').fallback('$data.sum(i$deleted)');
+      let ex4 = ex3;
+      let ex5 = i$('added').fallback(r('lol lol'));
 
       expect(parse.verb).to.equal(null);
       expect(parse.expression.toJS()).to.deep.equal(ex.toJS());
       expect(parse2.expression.toJS()).to.deep.equal(ex2.toJS());
       expect(parse3.expression.toJS()).to.deep.equal(ex3.toJS());
-      expect(parse4.expression.toJS()).to.deep.equal(ex3.toJS());
+      expect(parse4.expression.toJS()).to.deep.equal(ex4.toJS());
+      expect(parse5.expression.toJS()).to.deep.equal(ex5.toJS());
     });
 
     it("works with NOW()", () => {
@@ -590,13 +594,15 @@ describe("SQL parser", () => {
     it("should parse a table alias", () => {
       let parse1 = Expression.parseSQL('SELECT * FROM my-table AS t;');
       let parse2 = Expression.parseSQL('SELECT * FROM my-table t;');
+      let parse3 = Expression.parseSQL('SELECT t.* FROM my-table t;');
 
-      let ex2 = $('my-table');
+      let ex = $('my-table');
 
       expect(parse1.verb).to.equal('SELECT');
       expect(parse1.table).to.equal('my-table');
-      expect(parse1.expression.toJS()).to.deep.equal(ex2.toJS());
-      expect(parse2.expression.toJS()).to.deep.equal(ex2.toJS());
+      expect(parse1.expression.toJS()).to.deep.equal(ex.toJS());
+      expect(parse2.expression.toJS()).to.deep.equal(ex.toJS());
+      expect(parse3.expression.toJS()).to.deep.equal(ex.toJS());
     });
 
     it("should parse a total expression with all sorts of applies", () => {
@@ -624,6 +630,7 @@ describe("SQL parser", () => {
         EXP(0) AS One,
         +SUM(added) AS SimplyAdded,
         QUANTILE(added, 0.5) AS Median,
+        QUANTILE(added, 0.5, "resolution=400") AS MedianTuned,
         COUNT_DISTINCT(visitor) AS 'Unique1',
         COUNT( DISTINCT visitor) AS 'Unique2',
         COUNT(DISTINCT(visitor)) AS 'Unique3',
@@ -634,6 +641,10 @@ describe("SQL parser", () => {
         TIME_RANGE(time, PT1H) AS 'TimeRange1',
         TIME_RANGE(time, PT1H, 3) AS 'TimeRange3',
         OVERLAP(x, y) AS 'Overlap',
+        IF(x, "hello", \`world\`) AS 'If1',
+        CASE moon WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'more' END AS 'Case1',
+        CASE WHEN moon > 13 THEN 'T' ELSE 'F' END AS 'Case2',
+        CASE WHEN moon = 13 THEN 'TheOne' END AS 'Case3',
         CUSTOM('blah') AS 'Custom1',
         CUSTOM_AGGREGATE('blah') AS 'Custom2'
         FROM \`wiki\`
@@ -664,6 +675,7 @@ describe("SQL parser", () => {
         .apply('One', r(Math.E).power(0))
         .apply('SimplyAdded', '$data.sum(i$added)')
         .apply('Median', $('data').quantile('i$added', 0.5))
+        .apply('MedianTuned', $('data').quantile('i$added', 0.5, 'resolution=400'))
         .apply('Unique1', $('data').countDistinct('i$visitor'))
         .apply('Unique2', $('data').countDistinct('i$visitor'))
         .apply('Unique3', $('data').countDistinct('i$visitor'))
@@ -674,12 +686,17 @@ describe("SQL parser", () => {
         .apply('TimeRange1', i$('time').timeRange('PT1H'))
         .apply('TimeRange3', i$('time').timeRange('PT1H', 3))
         .apply('Overlap', i$('x').overlap('i$y'))
+        .apply('If1', i$('x').then('hello').fallback('i$world'))
+        .apply('Case1', 'i$moon.is(1).then(one).fallback(i$moon.is(2).then(two)).fallback(more)')
+        .apply('Case2', '(i$moon > 13).then(T).fallback(F)')
+        .apply('Case3', '(i$moon == 13).then(TheOne)')
         .apply('Custom1', $('data').customAggregate('blah'))
         .apply('Custom2', $('data').customAggregate('blah'))
         .select("aISb1", "aISb2", "aISb3", "Count1", "Count2", "Count3", "Count4", "Match", "CustomTransform",
           "TotalAdded", "Date", "TotalAddedOver4", "False", "MinusAdded", "AbsAdded", "AbsoluteAdded", "SqRtAdded",
-          "SqRtAdded2", "SquareRoot", "One", "SimplyAdded", "Median", "Unique1", "Unique2", "Unique3",
-          "TimeBucket", "TimeFloor", "TimeShift1", "TimeShift3", "TimeRange1", "TimeRange3", "Overlap", "Custom1", "Custom2");
+          "SqRtAdded2", "SquareRoot", "One", "SimplyAdded", "Median", "MedianTuned", "Unique1", "Unique2", "Unique3",
+          "TimeBucket", "TimeFloor", "TimeShift1", "TimeShift3", "TimeRange1", "TimeRange3", "Overlap",
+          "If1", "Case1", "Case2", "Case3", "Custom1", "Custom2");
 
       expect(parse.expression.toJS()).to.deep.equal(ex2.toJS());
     });
@@ -790,9 +807,9 @@ describe("SQL parser", () => {
 
       //let ex2s = ply()
       //  .apply('data', $('data').filter(
-      //    $('language').is("en").and($('time').in({
-      //      start: new Date('2015-01-01T10:30:00'),
-      //      end: new Date('2015-01-02T12:30:00')
+      //    $('language').is("en").and($('time').overlap({
+      //      start: new Date('2015-01-01T10:30:00Z'),
+      //      end: new Date('2015-01-02T12:30:00Z')
       //    }))
       //  ))
       //  .apply('TotalAdded', '$data.sum($added)');
@@ -1145,6 +1162,14 @@ describe("SQL parser", () => {
       expect(parse.expression.toJS()).to.deep.equal(ex2.toJS());
     });
 
+    it("should fail gracefully on invalid cast", () => {
+      expect(() => {
+        Expression.parseSQL(sane`
+          SELECT CAST(\`commentLength\` AS MOOMIN) as castedString FROM \`wiki\`
+        `);
+      }).to.throw('can not handle CAST to MOOMIN');
+    });
+
     it("should work with a SUBSTR and CONCAT function", () => {
       let parse = Expression.parseSQL(sane`
         SELECT
@@ -1185,11 +1210,28 @@ describe("SQL parser", () => {
       let parse = Expression.parseSQL(sane`
         SELECT \`page\` AS 'Page',
         SUM(added) AS 'TotalAdded'
-        FROM \`wiki\` WHERE LOCATE(\`page\`, 'title') > 0
+        FROM \`wiki\` WHERE LOCATE('title', \`page\`) > 0
         GROUP BY 1
       `);
 
-      let ex2 = $('wiki').filter(i$('page').indexOf('title').add(1).in({start: 0, end: null, bounds: '()'})).split("i$page", 'Page', 'data')
+      let ex2 = $('wiki').filter(i$('page').indexOf(r('title')).add(1).overlap({ start: 0, end: null, bounds: '()' }))
+        .split("i$page", 'Page', 'data')
+        .apply('TotalAdded', '$data.sum(i$added)')
+        .select('Page', 'TotalAdded');
+
+      expect(parse.expression.simplify().toJS()).to.deep.equal(ex2.toJS());
+    });
+
+    it("should work with a LOCATE LOWER function greater than 0", () => {
+      let parse = Expression.parseSQL(sane`
+        SELECT \`page\` AS 'Page',
+        SUM(added) AS 'TotalAdded'
+        FROM \`wiki\` WHERE LOCATE('good title', LOWER(\`page\`)) > 0
+        GROUP BY 1
+      `);
+
+      let ex2 = $('wiki').filter(i$('page').transformCase('lowerCase').indexOf(r('good title')).add(1).overlap({ start: 0, end: null, bounds: '()' }))
+        .split("i$page", 'Page', 'data')
         .apply('TotalAdded', '$data.sum(i$added)')
         .select('Page', 'TotalAdded');
 
@@ -1254,10 +1296,10 @@ describe("SQL parser", () => {
             i$('user').is(r("Bot Master 1"))
               .and(i$('page').isnt(r("Hello World")))
               .and(i$('added').lessThan(5))
-              .and(i$('language').in(['ca', 'cs', 'da', 'el']))
-              .and(i$('language').in(['ca', 'cs', 'da', 'el']))
-              .and(i$('language').in('i$languages'))
-              .and(i$('namespace').in(['simple', 'dict']).not())
+              .and(i$('language').is(['ca', 'cs', 'da', 'el']))
+              .and(i$('language').is(['ca', 'cs', 'da', 'el']))
+              .and(i$('language').is('i$languages'))
+              .and(i$('namespace').is(['simple', 'dict']).not())
               .and(i$('geo').isnt(null))
               .and(i$('page').contains('World', 'ignoreCase'))
               .and(i$('page').match('^.*Hello_World.*$'))

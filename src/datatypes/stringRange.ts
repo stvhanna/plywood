@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -78,10 +78,6 @@ export class StringRange extends Range<string> implements Instance<StringRangeVa
     return js;
   }
 
-  public toJSON(): StringRangeJS {
-    return this.toJS();
-  }
-
   public equals(other: StringRange): boolean {
     return other instanceof StringRange && this._equalsHelper(other);
   }
@@ -92,6 +88,10 @@ export class StringRange extends Range<string> implements Instance<StringRangeVa
 
   protected _zeroEndpoint() {
     return "";
+  }
+
+  protected validMemberType(val: any): boolean {
+    return typeof val === 'string';
   }
 }
 check = StringRange;

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2016 Imply Data, Inc.
+ * Copyright 2016-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,16 +14,14 @@
  * limitations under the License.
  */
 
-import { Timezone, Duration } from 'chronoshift';
-import { r, ExpressionJS, ExpressionValue, Expression, ChainableExpression } from './baseExpression';
-import { HasTimezone } from './mixins/hasTimezone';
+import { Duration, Timezone } from 'chronoshift';
+import { immutableEqual } from 'immutable-class';
+import { PlywoodValue, Set, TimeRange } from '../datatypes/index';
 import { SQLDialect } from '../dialect/baseDialect';
-import { PlywoodValue } from '../datatypes/index';
-import { InExpression } from './inExpression';
-import { TimeRange, Set } from '../datatypes/index';
+import { ChainableExpression, Expression, ExpressionJS, ExpressionValue } from './baseExpression';
+import { HasTimezone } from './mixins/hasTimezone';
 import { OverlapExpression } from './overlapExpression';
 import { TimeBucketExpression } from './timeBucketExpression';
-import { immutableEqual } from 'immutable-class';
 
 export class TimeFloorExpression extends ChainableExpression implements HasTimezone {
   static op = "TimeFloor";
@@ -100,7 +98,7 @@ export class TimeFloorExpression extends ChainableExpression implements HasTimez
       return timezone.equals(ex.timezone) && ex.duration.dividesBy(duration);
     }
 
-    if (ex instanceof InExpression || ex instanceof OverlapExpression) {
+    if (ex instanceof OverlapExpression) {
       let literal = ex.expression.getLiteralValue();
       if (literal instanceof TimeRange) {
         return literal.isAligned(duration, timezone);

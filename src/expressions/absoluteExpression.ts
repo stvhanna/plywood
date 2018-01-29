@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2016 Imply Data, Inc.
+ * Copyright 2016-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-import { r, ExpressionJS, ExpressionValue, Expression, ChainableExpression } from './baseExpression';
+import { PlywoodValue, Set } from '../datatypes/index';
 import { SQLDialect } from '../dialect/baseDialect';
-import { PlywoodValue } from '../datatypes/index';
+import { ChainableExpression, Expression, ExpressionJS, ExpressionValue } from './baseExpression';
 
 export class AbsoluteExpression extends ChainableExpression {
   static op = "Absolute";
@@ -27,11 +27,13 @@ export class AbsoluteExpression extends ChainableExpression {
   constructor(parameters: ExpressionValue) {
     super(parameters, dummyObject);
     this._ensureOp("absolute");
-    this.type = 'NUMBER';
+    this._checkOperandTypes('NUMBER');
+    this.type = this.operand.type;
   }
 
   protected _calcChainableHelper(operandValue: any): PlywoodValue {
-    return operandValue ? Math.abs(operandValue) : null;
+    if (operandValue == null) return null;
+    return Set.crossUnary(operandValue, (a) => Math.abs(a));
   }
 
   protected _getJSChainableHelper(operandJS: string): string {

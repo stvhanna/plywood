@@ -1,6 +1,6 @@
 /*
  * Copyright 2012-2015 Metamarkets Group Inc.
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ var $ = plywood.$;
 var i$ = plywood.i$;
 var r = plywood.r;
 var Expression = plywood.Expression;
+var LiteralExpression = plywood.LiteralExpression;
 var MatchExpression = plywood.MatchExpression;
 var SortExpression = plywood.SortExpression;
 var Set = plywood.Set;
@@ -37,9 +38,9 @@ function undummyNull(x) {
 var reservedWords = {
   ALL: 1, AND: 1, AS: 1, ASC: 1,
   BETWEEN: 1, BY: 1,
-  CONTAINS: 1, CREATE: 1,
+  CONTAINS: 1, CREATE: 1, CASE: 1,
   DELETE: 1, DESC: 1, DESCRIBE: 1, DISTINCT: 1, DROP: 1,
-  EXISTS: 1, EXPLAIN: 1, ESCAPE: 1,
+  EXISTS: 1, EXPLAIN: 1, ESCAPE: 1, END: 1,
   FALSE: 1, FROM: 1,
   GROUP: 1,
   HAVING: 1,
@@ -51,10 +52,10 @@ var reservedWords = {
   ON: 1, OR: 1, ORDER: 1,
   REPLACE: 1, REGEXP: 1,
   SELECT: 1, SET: 1, SHOW: 1,
-  TABLE: 1, TRUE: 1,
+  TABLE: 1, TRUE: 1, THEN: 1,
   UNION: 1, UPDATE: 1,
   VALUES: 1,
-  WHERE: 1
+  WHERE: 1, WHEN: 1
 };
 
 var unsupportedVerbs = {
@@ -123,7 +124,16 @@ function findTimePart(fmt, lookup) {
 
 var castTypes = {
   CHAR: 'STRING',
-  SIGNED: 'NUMBER'
+  CHARACTER: 'STRING',
+  VARCHAR: 'STRING',
+  TEXT: 'STRING',
+  SIGNED: 'NUMBER',
+  FLOAT: 'NUMBER',
+  REAL: 'NUMBER',
+  INTEGER: 'NUMBER',
+  BIGINT: 'NUMBER',
+  DECIMAL: 'NUMBER',
+  NUMERIC: 'NUMBER'
 }
 
 function upgrade(v) {
@@ -131,9 +141,15 @@ function upgrade(v) {
   return v;
 }
 
+function extractString(param) {
+  if (param instanceof LiteralExpression && param.type === 'STRING') {
+    return param.value;
+  }
+  error('expecting a string but got ' + param + ' instead');
+}
+
 function dateAddSub(op, d) {
-  if (d !== 0) error('only zero interval supported in date add and sub');
-  op = upgrade(op);
+  if (!Expression.ZERO.equals(d)) error('only zero interval supported in date add and sub');
 
   var headOperand = op.getHeadOperand();
   if (headOperand.op === 'ref') {
@@ -152,47 +168,49 @@ function dateAddSub(op, d) {
 
 var notImplemented = function() { error('not implemented yet'); };
 var fns = {
-  ABSOLUTE: function(op) { return upgrade(op).absolute(); },
-  OVERLAP: function(op, ex) { return upgrade(op).overlap(ex); },
-  SQRT: function(op) { return upgrade(op).power(0.5); },
+  ABSOLUTE: function(op) { return op.absolute(); },
+  OVERLAP: function(op, ex) { return op.overlap(ex); },
+  SQRT: function(op) { return op.power(0.5); },
   EXP: function(ex) { return r(Math.E).power(ex); },
-  POWER: function(op, ex) { return upgrade(op).power(ex); },
+  POWER: function(op, ex) { return op.power(ex); },
   NOW: function() { return r(new Date()); },
   CURDATE: function() { return r(chronoshift.day.floor(new Date(), Timezone.UTC)); },
-  CUSTOM_TRANSFORM: function(op, fn) { return upgrade(op).customTransform(fn); },
+  CUSTOM_TRANSFORM: function(op, fn) { return op.customTransform(fn); },
   ISNULL: function(ex) { return ex.is(null); },
-  FALLBACK: function(op, ex) { return upgrade(op).fallback(ex); },
-  MATCH: function(op, reg) { return upgrade(op).match(reg); },
-  EXTRACT: function(op, reg) { return upgrade(op).extract(reg); },
+  FALLBACK: function(op, ex) { return op.fallback(ex); },
+  IF: function(op, ex1, ex2) { return op.then(ex1).fallback(ex2); },
+  NULLIF: function(op, ex1) { return op.isnt(ex1).then(op); },
+  MATCH: function(op, reg) { return op.match(reg); },
+  EXTRACT: function(op, reg) { return op.extract(reg); },
   CONCAT: function() {
-    return Expression.concat(Array.prototype.map.call(arguments, function(arg) {
-      var e = upgrade(arg);
+    return Expression.concat(Array.prototype.map.call(arguments, function(e) {
       if (e.type === 'NUMBER') e = e.cast('STRING');
       return e;
     }));
   },
-  SUBSTRING: function(op, i, n) { return upgrade(op).substr(i, n); },
-  UPPER: function(op) { return upgrade(op).transformCase('upperCase'); },
-  LOWER: function(op) { return upgrade(op).transformCase('lowerCase'); },
-  LENGTH: function(op) { return upgrade(op).length(); },
-  LOCATE: function(op, ex) { return upgrade(op).indexOf(ex).add(1); },
-  TIME_FLOOR: function(op, d, tz) { return upgrade(op).timeFloor(d, tz); },
-  TIME_SHIFT: function(op, d, s, tz) { return upgrade(op).timeShift(d, s, tz); },
-  TIME_RANGE: function(op, d, s, tz) { return upgrade(op).timeRange(d, s, tz); },
-  TIME_BUCKET: function(op, d, tz) { return upgrade(op).timeBucket(d, tz); },
-  NUMBER_BUCKET: function(op, s, o) { return upgrade(op).numberBucket(s, o); },
-  TIME_PART: function(op, part, tz) { return upgrade(op).timePart(part, tz); },
-  LOOKUP: function(op, name) { return upgrade(op).lookup(name); },
+  SUBSTRING: function(op, i, n) { return op.substr(i, n); },
+  UPPER: function(op) { return op.transformCase('upperCase'); },
+  LOWER: function(op) { return op.transformCase('lowerCase'); },
+  LENGTH: function(op) { return op.length(); },
+  LOCATE: function(op, ex) { return ex.indexOf(op).add(1); },
+  TIME_FLOOR: function(op, d, tz) { return op.timeFloor(d, tz); },
+  TIME_SHIFT: function(op, d, s, tz) { return op.timeShift(d, s, tz); },
+  TIME_RANGE: function(op, d, s, tz) { return op.timeRange(d, s, tz); },
+  TIME_BUCKET: function(op, d, tz) { return op.timeBucket(d, tz); },
+  NUMBER_BUCKET: function(op, s, o) { return op.numberBucket(s, o); },
+  TIME_PART: function(op, part, tz) { return op.timePart(part, tz); },
+  LOOKUP: function(op, name) { return op.lookup(name); },
   PI: function() { return r(Math.PI); },
   STD: notImplemented,
   DATE_FORMAT: function(op, format) {
+    format = extractString(format);
     var duration = durationFormats[format.replace(/ 00:00:00$/, '')];
     if (duration) {
-      return upgrade(op).timeFloor(duration);
+      return op.timeFloor(duration);
     } else {
       var timePart = findTimePart(format, timePartFormats);
       if (!timePart) error('unsupported format: ' + format);
-      var ex = upgrade(op).timePart(timePart.part);
+      var ex = op.timePart(timePart.part);
       if (timePart.pre || timePart.post) ex = ex.cast("STRING");
       if (timePart.pre) ex = r(timePart.pre).concat(ex);
       if (timePart.post) ex = ex.concat(r(timePart.post));
@@ -200,25 +218,30 @@ var fns = {
     }
   },
 
-  YEAR: function(op, tz) { return upgrade(op).timePart('YEAR', tz); },
-  QUARTER: function(op, tz) { return upgrade(op).timePart('QUARTER', tz) },
-  MONTH: function(op, tz) { return upgrade(op).timePart('MONTH_OF_YEAR', tz); },
-  WEEK_OF_YEAR: function(op, tz) { return upgrade(op).timePart('WEEK_OF_YEAR', tz); },
-  DAY_OF_YEAR: function(op, tz) { return upgrade(op).timePart('DAY_OF_YEAR', tz); },
-  DAY_OF_MONTH: function(op, tz) { return upgrade(op).timePart('DAY_OF_MONTH', tz); },
-  DAY_OF_WEEK: function(op, tz) { return upgrade(op).timePart('DAY_OF_WEEK', tz); },
+  YEAR: function(op, tz) { return op.timePart('YEAR', tz); },
+  QUARTER: function(op, tz) { return op.timePart('QUARTER', tz) },
+  MONTH: function(op, tz) { return op.timePart('MONTH_OF_YEAR', tz); },
+  WEEK_OF_YEAR: function(op, tz) { return op.timePart('WEEK_OF_YEAR', tz); },
+  DAY_OF_YEAR: function(op, tz) { return op.timePart('DAY_OF_YEAR', tz); },
+  DAY_OF_MONTH: function(op, tz) { return op.timePart('DAY_OF_MONTH', tz); },
+  DAY_OF_WEEK: function(op, tz) { return op.timePart('DAY_OF_WEEK', tz); },
   WEEKDAY: notImplemented,
-  HOUR: function(op, tz) { return upgrade(op).timePart('HOUR_OF_DAY', tz); },
-  MINUTE: function(op, tz) { return upgrade(op).timePart('MINUTE_OF_HOUR', tz); },
-  SECOND: function(op, tz) { return upgrade(op).timePart('SECOND_OF_MINUTE', tz); },
-  DATE: function(op, tz) { return upgrade(op).timeFloor('P1D', tz); },
-  TIMESTAMP: function(op) { return upgrade(op).bumpStringLiteralToTime(); },
+  HOUR: function(op, tz) { return op.timePart('HOUR_OF_DAY', tz); },
+  MINUTE: function(op, tz) { return op.timePart('MINUTE_OF_HOUR', tz); },
+  SECOND: function(op, tz) { return op.timePart('SECOND_OF_MINUTE', tz); },
+  DATE: function(op, tz) { return op.timeFloor('P1D', tz); },
+  TIMESTAMP: function(op) { return op.upgradeToType('TIME'); },
   TIME: function() { error('time literals are not supported'); },
   DATE_ADD: dateAddSub,
   DATE_SUB: dateAddSub,
-  FROM_UNIXTIME: function(op) { return upgrade(op).multiply(1000).cast('TIME') },
-  CAST: function(op, ct) { return upgrade(op).cast(castTypes[ct]) },
-  UNIX_TIMESTAMP: function(op) { return upgrade(op).cast('NUMBER').divide(1000); },
+  FROM_UNIXTIME: function(op) { return op.multiply(1000).cast('TIME') },
+  CAST: function(op, ct) {
+    ct = extractString(ct);
+    var castTo = castTypes[ct.toUpperCase()];
+    if (!castTo) error('can not handle CAST to ' + ct);
+    return op.cast(castTo);
+  },
+  UNIX_TIMESTAMP: function(op) { return op.cast('NUMBER').divide(1000); },
 
   // Information Functions
   BENCHMARK: function() { return r(0); },
@@ -266,9 +289,8 @@ fns.SYSTEM_USER = fns.USER;
 fns.CURRENT_USER = fns.USER;
 fns.SCHEMA = fns.DATABASE;
 
-var objectHasOwnProperty = Object.prototype.hasOwnProperty;
 function reserved(str) {
-  return objectHasOwnProperty.call(reservedWords, str.toUpperCase());
+  return reservedWords.hasOwnProperty(str.toUpperCase());
 }
 
 function makeDate(type, v) {
@@ -662,7 +684,7 @@ SelectSubQuery
     { return constructQuery(distinct, columns, null, where, groupBys, having, orderBy, limit); }
 
 Columns
-  = StarToken
+  = (Ref Dot)? StarToken
     { return '*'; }
   / head:Column tail:(Comma Column)*
     { return makeListMap1(head, tail); }
@@ -797,7 +819,7 @@ ComparisonExpressionRhsNotable
     }
   / InToken list:(InSetLiteralExpression / AdditiveExpression)
     {
-      return function(ex) { return ex.in(list); };
+      return function(ex) { return ex.is(list); };
     }
   / ContainsToken string:String
     {
@@ -857,6 +879,7 @@ BasicExpression
   = LiteralExpression
   / AggregateExpression
   / FunctionCallExpression
+  / CaseExpression
   / OpenParen sub:(Expression / SelectSubQuery) CloseParen { return sub; }
   / RefExpression
 
@@ -879,11 +902,11 @@ AggregateExpression
       if (exd.ex === '*') error('can not use * for ' + fn + ' aggregator');
       return exd.data[fn](exd.ex);
     }
-  / QuantileToken OpenParen distinct:DistinctToken? exd:ExpressionMaybeFiltered Comma value:Number CloseParen
+  / QuantileToken OpenParen distinct:DistinctToken? exd:ExpressionMaybeFiltered Comma value:Number tuning:(Comma String)? CloseParen
     {
       if (distinct) error('can not use DISTINCT for quantile aggregator');
       if (exd.ex === '*') error('can not use * for quantile aggregator');
-      return exd.data.quantile(exd.ex, value);
+      return exd.data.quantile(exd.ex, value, tuning ? tuning[1] : null);
     }
   / (CustomAggregateToken / CustomToken) OpenParen value:String filter:WhereClause? CloseParen
     {
@@ -906,7 +929,7 @@ ExpressionMaybeFiltered
 
 FunctionCallExpression
   = fn:Fn OpenParen params:(Expression AsMandatory / Params) CloseParen
-    { return fn.apply(null, params); }
+    { return fn.apply(null, params.map(upgrade)); }
 
 Fn
   = name:Name &{ return fns[name.toUpperCase()]; }
@@ -917,6 +940,21 @@ Params
     { return makeListMap1(head, tail); }
 
 Param = Number / String / Interval / Expression;
+
+
+CaseExpression
+  = CaseToken v:Expression? cases:(WhenToken Expression ThenToken Expression)+ els:(ElseToken Expression)? EndToken
+    {
+      var ex;
+      cases.forEach(function(c) {
+        var cond = c[1];
+        if (v) cond = v.is(cond);
+        var myEx = cond.then(c[3]);
+        ex = ex ? ex.fallback(myEx) : myEx;
+      });
+      if (els) ex = ex.fallback(els[1]);
+      return ex;
+    }
 
 RefExpression
   = ref:NamespacedRef { return i$(ref.name); }
@@ -1059,6 +1097,12 @@ MaxToken           = "MAX"i            !IdentifierPart _ { return 'max'; }
 QuantileToken      = "QUANTILE"i       !IdentifierPart _ { return 'quantile'; }
 CustomToken        = "CUSTOM"i         !IdentifierPart _ { return 'customAggregate'; }
 CustomAggregateToken = "CUSTOM_AGGREGATE"i  !IdentifierPart _ { return 'customAggregate'; }
+
+CaseToken          = "CASE"i           !IdentifierPart _
+WhenToken          = "WHEN"i           !IdentifierPart _
+ThenToken          = "THEN"i           !IdentifierPart _
+ElseToken          = "ELSE"i           !IdentifierPart _
+EndToken           = "END"i            !IdentifierPart _
 
 DateToken          = "DATE"i           !IdentifierPart _ { return 'd'; }
 TimeToken          = "TIME"i           !IdentifierPart _ { return 't'; }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,36 +14,48 @@
  * limitations under the License.
  */
 
-import * as Q from 'q';
-import { Timezone, Duration } from 'chronoshift';
-import { immutableArraysEqual, immutableLookupsEqual, SimpleArray, NamedArray } from 'immutable-class';
-import { PlyType, DatasetFullType, PlyTypeSimple, FullType } from '../types';
-import { hasOwnProperty, nonEmptyLookup, safeAdd } from '../helper/utils';
+import { Duration, Timezone } from 'chronoshift';
+import * as hasOwnProp from 'has-own-prop';
+import { immutableArraysEqual, immutableLookupsEqual, NamedArray, SimpleArray } from 'immutable-class';
+import { PlywoodRequester } from 'plywood-base-api';
+import { ReadableStream, Transform, Writable, WritableStream } from 'readable-stream';
 import {
-  $, Expression, RefExpression, ExternalExpression,
-  ChainableExpression,
-  ChainableUnaryExpression,
+  AttributeInfo,
+  AttributeJSs,
+  Attributes,
+  Dataset,
+  Datum,
+  NumberRange,
+  PlywoodValue,
+  PlywoodValueBuilder
+} from '../datatypes/index';
+import { Set } from '../datatypes/set';
+import { StringRange } from '../datatypes/stringRange';
+import { TimeRange } from '../datatypes/timeRange';
+import { ExpressionJS } from '../expressions/baseExpression';
+import {
+  $,
+  AndExpression,
   ApplyExpression,
+  ChainableExpression,
+  ChainableUnaryExpression, CountDistinctExpression,
+  Expression,
+  ExternalExpression,
   FilterExpression,
   LimitExpression,
   NumberBucketExpression,
+  RefExpression,
   SelectExpression,
   SortExpression,
   SplitExpression,
   TimeBucketExpression,
-  TimeFloorExpression,
-  AndExpression
+  TimeFloorExpression
 } from '../expressions/index';
-import { PlywoodValue, Datum, Dataset } from '../datatypes/dataset';
-import { Attributes, AttributeInfo, AttributeJSs } from '../datatypes/attributeInfo';
-import { NumberRange } from '../datatypes/numberRange';
-import { unwrapSetType } from '../datatypes/common';
+import { ReadableError } from '../helper/streamBasics';
+import { StreamConcat } from '../helper/streamConcat';
+import { nonEmptyLookup, pipeWithError, safeAdd } from '../helper/utils';
+import { DatasetFullType, FullType, PlyType, PlyTypeSimple } from '../types';
 import { CustomDruidAggregations, CustomDruidTransforms } from './utils/druidTypes';
-import { ExpressionJS } from '../expressions/baseExpression';
-import { Set } from '../datatypes/set';
-import { StringRange } from '../datatypes/stringRange';
-import { TimeRange } from '../datatypes/timeRange';
-import { promiseWhile } from '../helper/promiseWhile';
 
 export class TotalContainer {
   public datum: Datum;
@@ -59,22 +71,23 @@ export class TotalContainer {
   }
 }
 
-export interface PostProcess {
-  (result: any): PlywoodValue | TotalContainer;
+export interface NextFn<Q> {
+  (prevQuery: Q, prevResultLength: number, prevMeta: any): Q;
 }
 
-export interface NextFn<Q, R> {
-  (prevQuery: Q, prevResult: R): Q;
-}
-
-export interface QueryAndPostProcess<T> {
+export interface QueryAndPostTransform<T> {
   query: T;
-  postProcess: PostProcess;
-  next?: NextFn<T, any>;
+  context?: Record<string, any>;
+  postTransform: Transform;
+  next?: NextFn<T>;
 }
 
 export interface Inflater {
-  (d: Datum, i: number, data: Datum[]): void;
+  (d: Datum): void;
+}
+
+export interface IntrospectOptions {
+  deep?: boolean;
 }
 
 export type QueryMode = "raw" | "value" | "total" | "split";
@@ -117,13 +130,13 @@ function getCommonFilter(filter1: Expression, filter2: Expression): Expression {
   return Expression.and(commonExpressions);
 }
 
-function mergeDerivedAttributes(derivedAttributes1: Lookup<Expression>, derivedAttributes2: Lookup<Expression>): Lookup<Expression> {
-  let derivedAttributes: Lookup<Expression> = Object.create(null);
+function mergeDerivedAttributes(derivedAttributes1: Record<string, Expression>, derivedAttributes2: Record<string, Expression>): Record<string, Expression> {
+  let derivedAttributes: Record<string, Expression> = Object.create(null);
   for (let k in derivedAttributes1) {
     derivedAttributes[k] = derivedAttributes1[k];
   }
   for (let k in derivedAttributes2) {
-    if (hasOwnProperty(derivedAttributes, k) && !derivedAttributes[k].equals(derivedAttributes2[k])) {
+    if (hasOwnProp(derivedAttributes, k) && !derivedAttributes[k].equals(derivedAttributes2[k])) {
       throw new Error(`can not currently redefine conflicting ${k}`);
     }
     derivedAttributes[k] = derivedAttributes2[k];
@@ -133,6 +146,9 @@ function mergeDerivedAttributes(derivedAttributes1: Lookup<Expression>, derivedA
 
 function getSampleValue(valueType: string, ex: Expression): PlywoodValue {
   switch (valueType) {
+    case 'NULL':
+      return null;
+
     case 'BOOLEAN':
       return true;
 
@@ -150,18 +166,18 @@ function getSampleValue(valueType: string, ex: Expression): PlywoodValue {
       }
 
     case 'TIME':
-      return new Date('2015-03-14T00:00:00');
+      return new Date('2015-03-14T00:00:00Z');
 
     case 'TIME_RANGE':
       if (ex instanceof TimeBucketExpression) {
         let timezone = ex.timezone || Timezone.UTC;
-        let start = ex.duration.floor(new Date('2015-03-14T00:00:00'), timezone);
+        let start = ex.duration.floor(new Date('2015-03-14T00:00:00Z'), timezone);
         return new TimeRange({
           start,
           end: ex.duration.shift(start, timezone, 1)
         });
       } else {
-        return new TimeRange({ start: new Date('2015-03-14T00:00:00'), end: new Date('2015-03-15T00:00:00') });
+        return new TimeRange({ start: new Date('2015-03-14T00:00:00Z'), end: new Date('2015-03-15T00:00:00Z') });
       }
 
     case 'STRING':
@@ -190,7 +206,7 @@ function getSampleValue(valueType: string, ex: Expression): PlywoodValue {
   }
 }
 
-function immutableAdd<T>(obj: Lookup<T>, key: string, value: T): Lookup<T> {
+function immutableAdd<T>(obj: Record<string, T>, key: string, value: T): Record<string, T> {
   let newObj = Object.create(null);
   for (let k in obj) newObj[k] = obj[k];
   newObj[key] = value;
@@ -212,7 +228,7 @@ export interface ExternalValue {
   rollup?: boolean;
   attributes?: Attributes;
   attributeOverrides?: Attributes;
-  derivedAttributes?: Lookup<Expression>;
+  derivedAttributes?: Record<string, Expression>;
   delegates?: External[];
   concealBuckets?: boolean;
   mode?: QueryMode;
@@ -236,9 +252,9 @@ export interface ExternalValue {
   allowSelectQueries?: boolean;
   introspectionStrategy?: string;
   exactResultsOnly?: boolean;
-  context?: Lookup<any>;
+  context?: Record<string, any>;
 
-  requester?: Requester.PlywoodRequester<any>;
+  requester?: PlywoodRequester<any>;
 }
 
 export interface ExternalJS {
@@ -248,7 +264,7 @@ export interface ExternalJS {
   rollup?: boolean;
   attributes?: AttributeJSs;
   attributeOverrides?: AttributeJSs;
-  derivedAttributes?: Lookup<ExpressionJS>;
+  derivedAttributes?: Record<string, ExpressionJS>;
   filter?: ExpressionJS;
   rawAttributes?: AttributeJSs;
   concealBuckets?: boolean;
@@ -262,7 +278,7 @@ export interface ExternalJS {
   allowSelectQueries?: boolean;
   introspectionStrategy?: string;
   exactResultsOnly?: boolean;
-  context?: Lookup<any>;
+  context?: Record<string, any>;
 }
 
 export interface ApplySegregation {
@@ -294,9 +310,9 @@ export abstract class External {
   static versionLessThan(va: string, vb: string): boolean {
     let pa = va.split('-')[0].split('.');
     let pb = vb.split('-')[0].split('.');
-    if (pa[0] !== pb[0]) return pa[0] < pb[0];
-    if (pa[1] !== pb[1]) return pa[1] < pb[1];
-    return pa[2] < pb[2];
+    if (pa[0] !== pb[0]) return Number(pa[0]) < Number(pb[0]);
+    if (pa[1] !== pb[1]) return Number(pa[1]) < Number(pb[1]);
+    return Number(pa[2]) < Number(pb[2]);
   }
 
   static deduplicateExternals(externals: External[]): External[] {
@@ -338,7 +354,7 @@ export abstract class External {
   static normalizeAndAddApply(attributesAndApplies: AttributesAndApplies, apply: ApplyExpression): AttributesAndApplies {
     let { attributes, applies } = attributesAndApplies;
 
-    let expressions: Lookup<Expression> = Object.create(null);
+    let expressions: Record<string, Expression> = Object.create(null);
     for (let existingApply of applies) expressions[existingApply.name] = existingApply.expression;
     apply = apply.changeExpression(apply.expression.resolveWithExpressions(expressions, 'leave').simplify());
 
@@ -399,7 +415,7 @@ export abstract class External {
     return commonFilter;
   }
 
-  static getMergedDerivedAttributesFromExternals(externals: External[]): Lookup<Expression> {
+  static getMergedDerivedAttributesFromExternals(externals: External[]): Record<string, Expression> {
     if (!externals.length) throw new Error('must have externals');
     let derivedAttributes = externals[0].derivedAttributes;
     for (let i = 1; i < externals.length; i++) {
@@ -410,8 +426,8 @@ export abstract class External {
 
   // ==== Inflaters
 
-  static getSimpleInflater(splitExpression: Expression, label: string): Inflater {
-    switch (splitExpression.type) {
+  static getSimpleInflater(type: PlyType, label: string): Inflater {
+    switch (type) {
       case 'BOOLEAN': return External.booleanInflaterFactory(label);
       case 'NUMBER': return External.numberInflaterFactory(label);
       case 'TIME': return External.timeInflaterFactory(label);
@@ -520,9 +536,9 @@ export abstract class External {
     };
   }
 
-  static typeCheckDerivedAttributes(derivedAttributes: Lookup<Expression>, typeContext: DatasetFullType): Lookup<Expression> {
+  static typeCheckDerivedAttributes(derivedAttributes: Record<string, Expression>, typeContext: DatasetFullType): Record<string, Expression> {
     let changed = false;
-    let newDerivedAttributes: Lookup<Expression> = {};
+    let newDerivedAttributes: Record<string, Expression> = {};
     for (let k in derivedAttributes) {
       let ex = derivedAttributes[k];
       let newEx = ex.changeInTypeContext(typeContext);
@@ -532,7 +548,62 @@ export abstract class External {
     return changed ? newDerivedAttributes : derivedAttributes;
   }
 
-  static jsToValue(parameters: ExternalJS, requester: Requester.PlywoodRequester<any>): ExternalValue {
+  static valuePostTransformFactory() {
+    let valueSeen = false;
+    return new Transform({
+      objectMode: true,
+      transform: (d: Datum, encoding, callback) => {
+        valueSeen = true;
+        callback(null, { type: 'value', value: d[External.VALUE_NAME] });
+      },
+      flush: (callback) => {
+        callback(null, valueSeen ? null : { type: 'value', value: 0 });
+      }
+    });
+  }
+
+  static postTransformFactory(inflaters: Inflater[], attributes: Attributes, keys: string[], zeroTotalApplies: ApplyExpression[]) {
+    let valueSeen = false;
+    return new Transform({
+      objectMode: true,
+      transform: function(d: Datum, encoding, callback) {
+        if (!valueSeen) {
+          this.push({
+            type: 'init',
+            attributes,
+            keys
+          });
+          valueSeen = true;
+        }
+        for (let inflater of inflaters) {
+          inflater(d);
+        }
+        callback(null, {
+          type: 'datum',
+          datum: d
+        });
+      },
+      flush: function(callback) {
+        if (!valueSeen) {
+          this.push({
+            type: 'init',
+            attributes,
+            keys: null
+          });
+
+          if (zeroTotalApplies) {
+            this.push({
+              type: 'datum',
+              datum: External.makeZeroDatum(zeroTotalApplies)
+            });
+          }
+        }
+        callback();
+      }
+    });
+  }
+
+  static jsToValue(parameters: ExternalJS, requester: PlywoodRequester<any>): ExternalValue {
     let value: ExternalValue = {
       engine: parameters.engine,
       version: parameters.version,
@@ -557,7 +628,7 @@ export abstract class External {
     return value;
   }
 
-  static classMap: Lookup<typeof External> = {};
+  static classMap: Record<string, typeof External> = {};
   static register(ex: typeof External): void {
     let engine = (<any>ex).engine.replace(/^\w/, (s: string) => s.toLowerCase());
     External.classMap[engine] = ex;
@@ -584,8 +655,8 @@ export abstract class External {
     return keyExternals[0].external.getBase().makeTotal(applies);
   }
 
-  static fromJS(parameters: ExternalJS, requester: Requester.PlywoodRequester<any> = null): External {
-    if (!hasOwnProperty(parameters, "engine")) {
+  static fromJS(parameters: ExternalJS, requester: PlywoodRequester<any> = null): External {
+    if (!hasOwnProp(parameters, "engine")) {
       throw new Error("external `engine` must be defined");
     }
     let engine: string = parameters.engine;
@@ -593,7 +664,7 @@ export abstract class External {
     let ClassFn = External.getConstructorFor(engine);
 
     // Back compat
-    if (!requester && hasOwnProperty(parameters, 'requester')) {
+    if (!requester && hasOwnProp(parameters, 'requester')) {
       console.warn("'requester' parameter should be passed as context (2nd argument)");
       requester = (parameters as any).requester;
     }
@@ -617,12 +688,12 @@ export abstract class External {
   public rollup: boolean;
   public attributes: Attributes = null;
   public attributeOverrides: Attributes = null;
-  public derivedAttributes: Lookup<Expression>;
+  public derivedAttributes: Record<string, Expression>;
   public delegates: External[];
   public concealBuckets: boolean;
 
   public rawAttributes: Attributes;
-  public requester: Requester.PlywoodRequester<any>;
+  public requester: PlywoodRequester<any>;
   public mode: QueryMode;
   public filter: Expression;
   public valueExpression: Expression;
@@ -840,7 +911,7 @@ export abstract class External {
     return External.fromValue(value);
   }
 
-  public attachRequester(requester: Requester.PlywoodRequester<any>): External {
+  public attachRequester(requester: PlywoodRequester<any>): External {
     let value = this.valueOf();
     value.requester = requester;
     return External.fromValue(value);
@@ -849,6 +920,10 @@ export abstract class External {
   public versionBefore(neededVersion: string): boolean {
     const { version } = this;
     return version && External.versionLessThan(version, neededVersion);
+  }
+
+  protected capability(cap: string): boolean {
+    return false;
   }
 
   public getAttributesInfo(attributeName: string) {
@@ -871,7 +946,7 @@ export abstract class External {
   public hasAttribute(name: string): boolean {
     const { attributes, rawAttributes, derivedAttributes } = this;
     if (SimpleArray.find(rawAttributes || attributes, (a) => a.name === name)) return true;
-    return hasOwnProperty(derivedAttributes, name);
+    return hasOwnProp(derivedAttributes, name);
   }
 
   public expressionDefined(ex: Expression): boolean {
@@ -1093,7 +1168,7 @@ export abstract class External {
     value.dataName = split.dataName;
     value.split = split;
     value.rawAttributes = value.attributes;
-    value.attributes = split.mapSplits((name, expression) => new AttributeInfo({ name, type: unwrapSetType(expression.type) }));
+    value.attributes = split.mapSplits((name, expression) => new AttributeInfo({ name, type: Set.unwrapSetType(expression.type) }));
     value.delegates = nullMap(value.delegates, (e) => e._addSplitExpression(split));
     return External.fromValue(value);
   }
@@ -1256,7 +1331,13 @@ export abstract class External {
   }
 
   public getQueryFilter(): Expression {
-    return this.inlineDerivedAttributes(this.filter).simplify();
+    let filter = this.inlineDerivedAttributes(this.filter).simplify();
+
+    if (filter instanceof RefExpression && !this.capability('filter-on-attribute')) {
+      filter = filter.is(true);
+    }
+
+    return filter;
   }
 
   public inlineDerivedAttributes(expression: Expression): Expression {
@@ -1272,10 +1353,11 @@ export abstract class External {
   }
 
   public getSelectedAttributes(): Attributes {
-    let { select, attributes, derivedAttributes } = this;
-    attributes = attributes.slice();
-    for (let k in derivedAttributes) {
-      attributes.push(new AttributeInfo({ name: k, type: derivedAttributes[k].type }));
+    let { mode, select, attributes, derivedAttributes } = this;
+    if (mode === 'raw') {
+      for (let k in derivedAttributes) {
+        attributes = attributes.concat(new AttributeInfo({ name: k, type: derivedAttributes[k].type }));
+      }
     }
     if (!select) return attributes;
     const selectAttributes = select.attributes;
@@ -1290,12 +1372,10 @@ export abstract class External {
 
   // -----------------
 
-  public addNextExternal(dataset: Dataset): Dataset {
+  public addNextExternalToDatum(datum: Datum): void {
     const { mode, dataName, split } = this;
-    if (mode !== 'split') throw new Error('must be in split mode to addNextExternal');
-    return dataset.applyFn(dataName, (d: Datum) => {
-      return this.getRaw()._addFilterExpression(Expression._.filter(split.filterFromDatum(d)));
-    }, 'DATASET');
+    if (mode !== 'split') throw new Error('must be in split mode to addNextExternalToDatum');
+    datum[dataName] = this.getRaw()._addFilterExpression(Expression._.filter(split.filterFromDatum(datum)));
   }
 
   public getDelegate(): External {
@@ -1314,15 +1394,15 @@ export abstract class External {
       return delegate.simulateValue(lastNode, simulatedQueries, externalForNext);
     }
 
-    simulatedQueries.push(this.getQueryAndPostProcess().query);
+    simulatedQueries.push(this.getQueryAndPostTransform().query);
 
     if (mode === 'value') {
       let valueExpression = this.valueExpression;
       return getSampleValue(valueExpression.type, valueExpression);
     }
 
+    let keys: string[] = null;
     let datum: Datum = {};
-
     if (mode === 'raw') {
       let attributes = this.attributes;
       for (let attribute of attributes) {
@@ -1331,8 +1411,9 @@ export abstract class External {
     } else {
       if (mode === 'split') {
         this.split.mapSplits((name, expression) => {
-          datum[name] = getSampleValue(unwrapSetType(expression.type), expression);
+          datum[name] = getSampleValue(Set.unwrapSetType(expression.type), expression);
         });
+        keys = this.split.mapSplits((name) => name);
       }
 
       let applies = this.applies;
@@ -1345,66 +1426,109 @@ export abstract class External {
       return new TotalContainer(datum);
     }
 
-    let dataset = new Dataset({ data: [datum] });
-    if (!lastNode && mode === 'split') dataset = externalForNext.addNextExternal(dataset);
-    return dataset;
+    if (!lastNode && mode === 'split') {
+      externalForNext.addNextExternalToDatum(datum);
+    }
+    return new Dataset({
+      keys,
+      data: [datum]
+    });
   }
 
-  public getQueryAndPostProcess(): QueryAndPostProcess<any> {
-    throw new Error("can not call getQueryAndPostProcess directly");
+  public getQueryAndPostTransform(): QueryAndPostTransform<any> {
+    throw new Error("can not call getQueryAndPostTransform directly");
   }
 
-  public queryValue(lastNode: boolean, externalForNext: External = null): Q.Promise<PlywoodValue | TotalContainer> {
-    const { mode, requester } = this;
+  public queryValue(lastNode: boolean, rawQueries: any[], externalForNext: External = null): Promise<PlywoodValue | TotalContainer> {
+    const { mode } = this;
+
+    return new Promise((resolve, reject) => {
+      let pvb = new PlywoodValueBuilder();
+      const target = new Writable({
+        objectMode: true,
+        write: function(chunk, encoding, callback) {
+          pvb.processBit(chunk);
+          callback(null);
+        }
+      })
+        .on('finish', () => {
+          let v: PlywoodValue | TotalContainer = pvb.getValue();
+          if (mode === 'total' && v instanceof Dataset && v.data.length === 1) v = new TotalContainer(v.data[0]);
+          resolve(v);
+        });
+
+      const stream = this.queryValueStream(lastNode, rawQueries, externalForNext);
+      stream.pipe(target);
+      stream.on('error', (e: Error) => {
+        stream.unpipe(target);
+        reject(e);
+      });
+    });
+  }
+
+  public queryValueStream(lastNode: boolean, rawQueries: any[], externalForNext: External = null): ReadableStream {
+    const { engine, mode, requester } = this;
 
     if (!externalForNext) externalForNext = this;
 
     let delegate = this.getDelegate();
     if (delegate) {
-      return delegate.queryValue(lastNode, externalForNext);
+      return delegate.queryValueStream(lastNode, rawQueries, externalForNext);
     }
 
     if (!requester) {
-      return <Q.Promise<PlywoodValue | TotalContainer>>Q.reject(new Error('must have a requester to make queries'));
+      return new ReadableError('must have a requester to make queries');
     }
-    let queryAndPostProcess: QueryAndPostProcess<any>;
+    let queryAndPostTransform: QueryAndPostTransform<any>;
     try {
-      queryAndPostProcess = this.getQueryAndPostProcess();
+      queryAndPostTransform = this.getQueryAndPostTransform();
     } catch (e) {
-      return <Q.Promise<PlywoodValue | TotalContainer>>Q.reject(e);
+      return new ReadableError(e);
     }
 
-    let { query, postProcess, next } = queryAndPostProcess;
-    if (!query || typeof postProcess !== 'function') {
-      return <Q.Promise<PlywoodValue>>Q.reject(new Error('no query or postProcess'));
+    let { query, context, postTransform, next } = queryAndPostTransform;
+    if (!query || !postTransform) {
+      return new ReadableError('no query or postTransform');
     }
 
-    let finalResult: Q.Promise<PlywoodValue | TotalContainer>;
+    let finalStream: ReadableStream;
     if (next) {
-      let results: any[] = [];
-      finalResult = promiseWhile(
-        () => query,
-        () => {
-          return requester({ query })
-            .then((result) => {
-              results.push(result);
-              query = next(query, result);
-            });
+      let streamNumber = 0;
+      let meta: any = null;
+      let numResults: number;
+      const resultStream = new StreamConcat({
+        objectMode: true,
+        next: () => {
+          if (streamNumber) query = next(query, numResults, meta);
+          if (!query) return null;
+          streamNumber++;
+          if (rawQueries) rawQueries.push({ engine, query });
+          const stream = requester({ query, context });
+          meta = null;
+          stream.on('meta', (m: any) => meta = m);
+          numResults = 0;
+          stream.on('data', () => numResults++);
+          return stream;
         }
-      )
-        .then(() => {
-          return queryAndPostProcess.postProcess(results);
-        });
+      });
+
+      finalStream = pipeWithError(resultStream, queryAndPostTransform.postTransform);
     } else {
-      finalResult = requester({ query })
-        .then(queryAndPostProcess.postProcess);
+      if (rawQueries) rawQueries.push({ engine, query });
+      finalStream = pipeWithError(requester({ query, context }), queryAndPostTransform.postTransform);
     }
 
     if (!lastNode && mode === 'split') {
-      finalResult = <Q.Promise<PlywoodValue>>finalResult.then(externalForNext.addNextExternal.bind(externalForNext));
+      finalStream = pipeWithError(finalStream, new Transform({
+        objectMode: true,
+        transform: (chunk, enc, callback) => {
+          if (chunk.type === 'datum') externalForNext.addNextExternalToDatum(chunk.datum);
+          callback(null, chunk);
+        }
+      }));
     }
 
-    return finalResult;
+    return finalStream;
   }
 
   // -------------------------
@@ -1413,22 +1537,22 @@ export abstract class External {
     return !this.rawAttributes.length;
   }
 
-  protected abstract getIntrospectAttributes(): Q.Promise<Attributes>
+  protected abstract getIntrospectAttributes(deep: boolean): Promise<Attributes>;
 
-  public introspect(): Q.Promise<External> {
+  public introspect(options: IntrospectOptions = {}): Promise<External> {
     if (!this.requester) {
-      return <Q.Promise<External>>Q.reject(new Error('must have a requester to introspect'));
+      return <Promise<External>>Promise.reject(new Error('must have a requester to introspect'));
     }
 
     if (!this.version) {
       return (this.constructor as any).getVersion(this.requester).then((version: string) => {
         version = External.extractVersion(version);
         if (!version) throw new Error('external version not found, please specify explicitly');
-        return this.changeVersion(version).introspect();
+        return this.changeVersion(version).introspect(options);
       });
     }
 
-    return this.getIntrospectAttributes()
+    return this.getIntrospectAttributes(options.deep)
       .then((attributes) => {
         let value = this.valueOf();
 
@@ -1452,7 +1576,7 @@ export abstract class External {
     let { rawAttributes, derivedAttributes } = this;
     if (!rawAttributes.length) throw new Error("dataset has not been introspected");
 
-    let myDatasetType: Lookup<FullType> = {};
+    let myDatasetType: Record<string, FullType> = {};
     for (let rawAttribute of rawAttributes) {
       let attrName = rawAttribute.name;
       myDatasetType[attrName] = {
@@ -1481,7 +1605,7 @@ export abstract class External {
     let myFullType = this.getRawFullType();
 
     if (mode !== 'raw') {
-      let splitDatasetType: Lookup<FullType> = {};
+      let splitDatasetType: Record<string, FullType> = {};
       splitDatasetType[this.dataName || External.SEGMENT_NAME] = myFullType;
 
       for (let attribute of attributes) {

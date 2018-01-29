@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-import { Expression, ExpressionValue, ExpressionJS, ChainableUnaryExpression } from './baseExpression';
-import { PlyType, DatasetFullType, PlyTypeSingleValue, FullType } from '../types';
+import { ComputeFn, Datum, PlywoodValue } from '../datatypes/index';
 import { SQLDialect } from '../dialect/baseDialect';
-import { ComputeFn, Datum, PlywoodValue } from '../datatypes/dataset';
 import { External } from '../external/baseExternal';
+import { DatasetFullType } from '../types';
+import { ChainableUnaryExpression, Expression, ExpressionJS, ExpressionValue } from './baseExpression';
 
 export class ExternalExpression extends Expression {
   static op = "external";

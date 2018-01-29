@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2016 Imply Data, Inc.
+ * Copyright 2016-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-import { r, ExpressionJS, ExpressionValue, Expression, ChainableUnaryExpression } from './baseExpression';
-import { SQLDialect } from '../dialect/baseDialect';
 import { PlywoodValue } from '../datatypes/index';
+import { SQLDialect } from '../dialect/baseDialect';
+import { ChainableUnaryExpression, Expression, ExpressionJS, ExpressionValue } from './baseExpression';
 
 export class FallbackExpression extends ChainableUnaryExpression {
   static op = "Fallback";
@@ -24,7 +24,7 @@ export class FallbackExpression extends ChainableUnaryExpression {
     return new FallbackExpression(ChainableUnaryExpression.jsToValue(parameters));
   }
 
-  constructor(parameters: ExpressionValue = {}) {
+  constructor(parameters: ExpressionValue) {
     super(parameters, dummyObject);
     this._ensureOp("fallback");
     this._checkOperandExpressionTypesAlign();
@@ -36,11 +36,11 @@ export class FallbackExpression extends ChainableUnaryExpression {
   }
 
   protected _getJSChainableUnaryHelper(operandJS: string, expressionJS: string): string {
-    return `(_ = ${operandJS}, (_ === null ? ${expressionJS} : _))`;
+    return `((_=${operandJS}),(_!==null?_:${expressionJS}))`;
   }
 
   protected _getSQLChainableUnaryHelper(dialect: SQLDialect, operandSQL: string, expressionSQL: string): string {
-    return `COALESCE(${operandSQL}, ${expressionSQL})`;
+    return dialect.coalesceExpression(operandSQL, expressionSQL);
   }
 
   public specialSimplify(): Expression {

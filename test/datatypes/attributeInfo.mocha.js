@@ -1,6 +1,6 @@
 /*
  * Copyright 2012-2015 Metamarkets Group Inc.
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-let { expect } = require("chai");
+const { expect } = require("chai");
 
 let { testImmutableClass } = require("immutable-class-tester");
 
@@ -28,8 +28,10 @@ describe("AttributeInfo", () => {
       { name: 'time', type: 'TIME' },
       { name: 'color', type: 'STRING' },
       { name: 'cut', type: 'STRING' },
+      { name: 'cut', type: 'STRING', cardinality: 100 },
+      { name: 'cut', type: 'STRING', range: { start: 'A', end: 'F' } },
       { name: 'tags', type: 'SET/STRING' },
-      { name: 'carat', type: 'NUMBER' },
+      { name: 'carat', type: 'NUMBER', nativeType: 'STRING' },
       { name: 'count', type: 'NUMBER', unsplitable: true, maker: { op: 'count' } },
       {
         name: 'price',
@@ -38,9 +40,7 @@ describe("AttributeInfo", () => {
         maker: { op: 'sum', expression: { op: 'ref', name: 'price' } }
       },
       { name: 'tax', type: 'NUMBER', unsplitable: true },
-      { name: 'vendor_id', special: 'unique', type: "STRING" },
-      { name: 'vendor_id', special: 'theta', type: "STRING" },
-      { name: 'vendor_hist', special: 'histogram', type: "NUMBER" }
+      { name: 'vendor_id', nativeType: 'hyperUnique', type: "NULL" }
     ]);
   });
 });

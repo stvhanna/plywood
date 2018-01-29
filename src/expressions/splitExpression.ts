@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2016 Imply Data, Inc.
+ * Copyright 2016-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,15 +14,24 @@
  * limitations under the License.
  */
 
-import { r, ExpressionJS, ExpressionValue, Expression, ChainableExpression, Splits, SplitsJS, SubstitutionFn, Indexer, ExpressionTypeContext } from './baseExpression';
-import { PlyType, DatasetFullType, SimpleFullType, FullType } from '../types';
-import { Aggregate } from './mixins/aggregate';
-import { SQLDialect } from '../dialect/baseDialect';
-import { Datum, PlywoodValue, Dataset } from '../datatypes/dataset';
-import { unwrapSetType } from '../datatypes/common';
-import { hasOwnProperty } from '../helper/utils';
+import * as hasOwnProp from 'has-own-prop';
 import { immutableLookupsEqual } from 'immutable-class';
-import { isSetType } from '../datatypes/common';
+import { Dataset, Datum, PlywoodValue, Set } from '../datatypes/index';
+import { SQLDialect } from '../dialect/baseDialect';
+import { DatasetFullType, FullType } from '../types';
+import {
+  ChainableExpression,
+  Expression,
+  ExpressionJS,
+  ExpressionTypeContext,
+  ExpressionValue,
+  Indexer,
+  r,
+  Splits,
+  SplitsJS,
+  SubstitutionFn
+} from './baseExpression';
+import { Aggregate } from './mixins/aggregate';
 
 export class SplitExpression extends ChainableExpression implements Aggregate {
   static op = "Split";
@@ -118,10 +127,10 @@ export class SplitExpression extends ChainableExpression implements Aggregate {
   }
 
   public updateTypeContext(typeContext: DatasetFullType): DatasetFullType {
-    let newDatasetType: Lookup<FullType> = {};
+    let newDatasetType: Record<string, FullType> = {};
     this.mapSplits((name, expression) => {
       newDatasetType[name] = {
-        type: unwrapSetType(expression.type)
+        type: Set.unwrapSetType(expression.type)
       } as any;
     });
     newDatasetType[this.dataName] = typeContext;
@@ -155,9 +164,9 @@ export class SplitExpression extends ChainableExpression implements Aggregate {
     return res;
   }
 
-  public mapSplitExpressions<T>(fn: (expression: Expression, name?: string) => T): Lookup<T> {
+  public mapSplitExpressions<T>(fn: (expression: Expression, name?: string) => T): Record<string, T> {
     let { splits, keys } = this;
-    let ret: Lookup<T> = Object.create(null);
+    let ret: Record<string, T> = Object.create(null);
     for (let key of keys) {
       ret[key] = fn(splits[key], key);
     }
@@ -179,8 +188,12 @@ export class SplitExpression extends ChainableExpression implements Aggregate {
     return this.mapSplits((name, expression) => `${expression.getSQL(dialect)} AS ${dialect.escapeName(name)}`);
   }
 
-  public getShortGroupBySQL(): string {
-    return 'GROUP BY ' + Object.keys(this.splits).map((d, i) => i + 1).join(', ');
+  public getGroupBySQL(dialect: SQLDialect): string[] {
+    return this.mapSplits((name, expression) => expression.getSQL(dialect));
+  }
+
+  public getShortGroupBySQL(): string[] {
+    return Object.keys(this.splits).map((d, i) => String(i + 1));
   }
 
   public fullyDefined(): boolean {
@@ -235,8 +248,8 @@ export class SplitExpression extends ChainableExpression implements Aggregate {
 
   public filterFromDatum(datum: Datum): Expression {
     return Expression.and(this.mapSplits((name, expression) => {
-      if (isSetType(expression.type)) {
-        return r(datum[name]).in(expression);
+      if (Set.isSetType(expression.type)) {
+        return r(datum[name]).overlap(expression);
       } else {
         return expression.is(r(datum[name]));
       }
@@ -244,14 +257,14 @@ export class SplitExpression extends ChainableExpression implements Aggregate {
   }
 
   public hasKey(key: string): boolean {
-    return hasOwnProperty(this.splits, key);
+    return hasOwnProp(this.splits, key);
   }
 
   public isLinear(): boolean {
     let { splits, keys } = this;
     for (let k of keys) {
       let split = splits[k];
-      if (isSetType(split.type)) return false;
+      if (Set.isSetType(split.type)) return false;
     }
     return true;
   }

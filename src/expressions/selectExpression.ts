@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2016 Imply Data, Inc.
+ * Copyright 2016-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-import { r, ExpressionJS, ExpressionValue, Expression, ChainableExpression } from './baseExpression';
+import { Dataset, PlywoodValue } from '../datatypes/index';
 import { SQLDialect } from '../dialect/baseDialect';
-import { PlywoodValue, Dataset } from '../datatypes/index';
 import { DatasetFullType } from '../types';
 import { ApplyExpression } from './applyExpression';
+import { ChainableExpression, Expression, ExpressionJS, ExpressionValue } from './baseExpression';
 
 export class SelectExpression extends ChainableExpression {
   static op = "Select";
@@ -30,7 +30,7 @@ export class SelectExpression extends ChainableExpression {
 
   public attributes: string[];
 
-  constructor(parameters: ExpressionValue = {}) {
+  constructor(parameters: ExpressionValue) {
     super(parameters, dummyObject);
     this._ensureOp("select");
     this._checkOperandTypes('DATASET');

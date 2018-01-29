@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,10 +14,8 @@
  * limitations under the License.
  */
 
-let objectHasOwnProperty = Object.prototype.hasOwnProperty;
-export function hasOwnProperty(obj: any, key: string): boolean {
-  return objectHasOwnProperty.call(obj, key);
-}
+import * as hasOwnProp from 'has-own-prop';
+import { ReadableStream, WritableStream } from 'readable-stream';
 
 export function repeat(str: string, times: int): string {
   return new Array(times + 1).join(str);
@@ -28,7 +26,7 @@ export function indentBy(str: string, indent: int): string {
   return str.split('\n').map((x) => spaces + x).join('\n');
 }
 
-export function dictEqual(dictA: Lookup<any>, dictB: Lookup<any>): boolean {
+export function dictEqual(dictA: Record<string, any>, dictB: Record<string, any>): boolean {
   if (dictA === dictB) return true;
   if (!dictA !== !dictB) return false;
   let keys = Object.keys(dictA);
@@ -42,7 +40,7 @@ export function dictEqual(dictA: Lookup<any>, dictB: Lookup<any>): boolean {
 export function shallowCopy<T>(thing: T): T {
   let newThing: any = {};
   for (let k in thing) {
-    if (hasOwnProperty(thing, k)) newThing[k] = (thing as any)[k];
+    if (hasOwnProp(thing, k)) newThing[k] = (thing as any)[k];
   }
   return newThing;
 }
@@ -58,22 +56,22 @@ export function deduplicateSort(a: string[]): string[] {
   return newA;
 }
 
-export function mapLookup<T, U>(thing: Lookup<T>, fn: (x: T) => U): Lookup<U> {
-  let newThing: Lookup<U> = Object.create(null);
+export function mapLookup<T, U>(thing: Record<string, T>, fn: (x: T) => U): Record<string, U> {
+  let newThing: Record<string, U> = Object.create(null);
   for (let k in thing) {
-    if (hasOwnProperty(thing, k)) newThing[k] = fn(thing[k]);
+    if (hasOwnProp(thing, k)) newThing[k] = fn(thing[k]);
   }
   return newThing;
 }
 
-export function emptyLookup(lookup: Lookup<any>): boolean {
+export function emptyLookup(lookup: Record<string, any>): boolean {
   for (let k in lookup) {
-    if (hasOwnProperty(lookup, k)) return false;
+    if (hasOwnProp(lookup, k)) return false;
   }
   return true;
 }
 
-export function nonEmptyLookup(lookup: Lookup<any>): boolean {
+export function nonEmptyLookup(lookup: Record<string, any>): boolean {
   return !emptyLookup(lookup);
 }
 
@@ -123,4 +121,14 @@ export class ExtendableError extends Error {
       this.stack = (new Error(message) as any).stack;
     }
   }
+}
+
+export function pluralIfNeeded(n: number, thing: string): string {
+  return `${n} ${thing}${n === 1 ? '' : 's'}`;
+}
+
+export function pipeWithError(src: ReadableStream, dest: WritableStream): any {
+  src.pipe(dest);
+  src.on('error', (e: Error) => dest.emit('error', e));
+  return dest;
 }

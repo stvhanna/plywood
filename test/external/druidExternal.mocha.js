@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,14 +14,15 @@
  * limitations under the License.
  */
 
-let { expect } = require("chai");
-let Q = require('q');
+const { expect } = require("chai");
+const { PassThrough } = require('readable-stream');
+
 let { sane } = require('../utils');
 
 let plywood = require('../plywood');
 let { External, TimeRange, $, ply, r, AttributeInfo } = plywood;
 
-let timeFilter = $('time').in(TimeRange.fromJS({
+let timeFilter = $('time').overlap(TimeRange.fromJS({
   start: new Date("2013-02-26T00:00:00Z"),
   end: new Date("2013-02-27T00:00:00Z")
 }));
@@ -37,28 +38,33 @@ let context = {
       { name: 'language', type: 'STRING' },
       { name: 'page', type: 'STRING' },
       { name: 'tags', type: 'SET/STRING' },
-      { name: 'commentLength', type: 'NUMBER' },
+      { name: 'commentLength', type: 'NUMBER', nativeType: 'LONG' },
       { name: 'isRobot', type: 'BOOLEAN' },
-      { name: 'count', type: 'NUMBER', unsplitable: true },
-      { name: 'added', type: 'NUMBER', unsplitable: true },
-      { name: 'deleted', type: 'NUMBER', unsplitable: true },
-      { name: 'inserted', type: 'NUMBER', unsplitable: true },
-      { name: 'delta_hist', special: 'histogram' }
+      { name: 'count', type: 'NUMBER', nativeType: 'LONG', unsplitable: true },
+      { name: 'added', type: 'NUMBER', nativeType: 'LONG', unsplitable: true },
+      { name: 'deleted', type: 'NUMBER', nativeType: 'LONG', unsplitable: true },
+      { name: 'inserted', type: 'NUMBER', nativeType: 'FLOAT', unsplitable: true },
+      { name: 'delta_hist', type: 'NULL', nativeType: 'approximateHistogram', unsplitable: true }
     ],
     derivedAttributes: {
       pageInBrackets: "'[' ++ $page ++ ']'",
       page3: "$page.substr(0, 3)"
+      //constant: "hello.fallback($page)"
     },
     filter: timeFilter,
     allowSelectQueries: true,
-    version: '0.9.2',
+    version: '0.11.0',
     customAggregations: {
       crazy: {
-        accessType: 'getSomeCrazy',
         aggregation: {
+          name: '!T_LOL',
           type: 'crazy',
           the: 'borg will rise again',
           activate: false
+        },
+        postAggregation: {
+          type: 'double_up',
+          fieldName: '!T_LOL'
         }
       },
       stupid: {
@@ -102,9 +108,10 @@ let contextNoApprox = {
       { name: 'time', type: 'TIME' },
       { name: 'language', type: 'STRING' },
       { name: 'page', type: 'STRING' },
-      { name: 'added', type: 'NUMBER', unsplitable: true },
-      { name: 'deleted', type: 'NUMBER', unsplitable: true },
-      { name: 'inserted', type: 'NUMBER', unsplitable: true }
+      { name: 'count', type: 'NUMBER', nativeType: 'LONG', unsplitable: true },
+      { name: 'added', type: 'NUMBER', nativeType: 'LONG', unsplitable: true },
+      { name: 'deleted', type: 'NUMBER', nativeType: 'LONG', unsplitable: true },
+      { name: 'inserted', type: 'NUMBER', nativeType: 'FLOAT', unsplitable: true },
     ],
     filter: timeFilter
   })
@@ -124,7 +131,7 @@ describe("DruidExternal", () => {
       expect(ex.op).to.equal('literal');
       let druidExternal = ex.value.getReadyExternals()[0].external;
 
-      expect(druidExternal.getQueryAndPostProcess().query).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query).to.deep.equal({
         "dataSource": "wikipedia",
         "queryType": "timeBoundary"
       });
@@ -138,12 +145,12 @@ describe("DruidExternal", () => {
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
 
-      expect(druidExternal.getQueryAndPostProcess().query).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query).to.deep.equal({
         "aggregations": [
           {
             "fieldName": "added",
             "name": "__VALUE__",
-            "type": "doubleSum"
+            "type": "longSum"
           }
         ],
         "dataSource": "wikipedia",
@@ -166,13 +173,13 @@ describe("DruidExternal", () => {
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
 
-      expect(druidExternal.getQueryAndPostProcess().query).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query).to.deep.equal({
         "aggregations": [
           {
             "aggregator": {
               "fieldName": "added",
               "name": "!T_0",
-              "type": "doubleSum"
+              "type": "longSum"
             },
             "filter": {
               "dimension": "language",
@@ -185,7 +192,7 @@ describe("DruidExternal", () => {
           {
             "fieldName": "deleted",
             "name": "!T_1",
-            "type": "doubleSum"
+            "type": "longSum"
           }
         ],
         "dataSource": "wikipedia",
@@ -223,7 +230,7 @@ describe("DruidExternal", () => {
       expect(ex.op).to.equal('literal');
       let druidExternal = ex.value.getReadyExternals()[0].external;
 
-      expect(druidExternal.getQueryAndPostProcess().query).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query).to.deep.equal({
         "aggregations": [
           {
             "name": "Count",
@@ -232,7 +239,7 @@ describe("DruidExternal", () => {
           {
             "fieldName": "added",
             "name": "TotalAdded",
-            "type": "doubleSum"
+            "type": "longSum"
           }
         ],
         "dataSource": "wikipedia",
@@ -257,13 +264,13 @@ describe("DruidExternal", () => {
       expect(ex.op).to.equal('literal');
       let druidExternal = ex.value.getReadyExternals()[0].external;
 
-      let queryAndPostProcess = druidExternal.getQueryAndPostProcess();
-      expect(queryAndPostProcess.query).to.deep.equal({
+      let queryAndPostTransform = druidExternal.getQueryAndPostTransform();
+      expect(queryAndPostTransform.query).to.deep.equal({
         "aggregations": [
           {
             "fieldName": "added",
             "name": "TotalAdded",
-            "type": "doubleSum"
+            "type": "longSum"
           }
         ],
         "dataSource": "wikipedia",
@@ -301,7 +308,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query).to.deep.equal({
         "aggregations": [
           {
             "name": "Count",
@@ -310,7 +317,7 @@ describe("DruidExternal", () => {
           {
             "fieldName": "added",
             "name": "Added",
-            "type": "doubleSum"
+            "type": "longSum"
           }
         ],
         "dataSource": "wikipedia",
@@ -338,7 +345,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query).to.deep.equal({
         "aggregations": [
           {
             "name": "Count",
@@ -347,7 +354,7 @@ describe("DruidExternal", () => {
           {
             "fieldName": "added",
             "name": "Added",
-            "type": "doubleSum"
+            "type": "longSum"
           }
         ],
         "dataSource": "wikipedia",
@@ -385,11 +392,11 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query).to.deep.equal({
         "aggregations": [
           {
             "activate": false,
-            "name": "!T_0",
+            "name": "!T_LOL",
             "the": "borg will rise again",
             "type": "crazy"
           },
@@ -411,10 +418,15 @@ describe("DruidExternal", () => {
         "metric": "CrazyStupid",
         "postAggregations": [
           {
+            "fieldName": "!T_LOL",
+            "name": "!T_0",
+            "type": "double_up"
+          },
+          {
             "fields": [
               {
                 "fieldName": "!T_0",
-                "type": "getSomeCrazy"
+                "type": "fieldAccess"
               },
               {
                 "fieldName": "!T_1",
@@ -429,7 +441,7 @@ describe("DruidExternal", () => {
             "fields": [
               {
                 "fieldName": "!T_0",
-                "type": "getSomeCrazy"
+                "type": "fieldAccess"
               },
               {
                 "fieldName": "!T_1",
@@ -456,7 +468,7 @@ describe("DruidExternal", () => {
       expect(ex.op).to.equal('literal');
       let druidExternal = ex.value.getReadyExternals()[0].external;
 
-      expect(druidExternal.getQueryAndPostProcess().query.aggregations).to.deep.equal([
+      expect(druidExternal.getQueryAndPostTransform().query.aggregations).to.deep.equal([
         {
           "fieldNames": [
             "added"
@@ -472,7 +484,7 @@ describe("DruidExternal", () => {
             "added",
             "deleted"
           ],
-          "fnAggregate": "function($$,_added,_deleted) { return $$+((Math.pow(parseFloat(_added),2)*parseFloat(_deleted))/Math.abs(parseFloat(_added))); }",
+          "fnAggregate": "function($$,_added,_deleted) { return $$+(_=Math.abs(parseFloat(_added)),(_===0||isNaN(_)?null:(Math.pow(parseFloat(_added),2)*parseFloat(_deleted))/Math.abs(parseFloat(_added)))); }",
           "fnCombine": "function(a,b) { return a+b; }",
           "fnReset": "function() { return 0; }",
           "name": "SumComplex",
@@ -493,13 +505,13 @@ describe("DruidExternal", () => {
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
 
-      expect(druidExternal.getQueryAndPostProcess().query).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query).to.deep.equal({
         "aggregations": [
           {
             "aggregator": {
               "fieldName": "deleted",
               "name": "FilteredSumDeleted",
-              "type": "doubleSum"
+              "type": "longSum"
             },
             "filter": {
               "dimension": "page",
@@ -517,7 +529,7 @@ describe("DruidExternal", () => {
             "aggregator": {
               "fieldName": "deleted",
               "name": "Filtered2",
-              "type": "doubleSum"
+              "type": "longSum"
             },
             "filter": {
               "dimension": "page",
@@ -554,7 +566,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query).to.deep.equal({
         "aggregations": [
           {
             "name": "Count",
@@ -563,7 +575,7 @@ describe("DruidExternal", () => {
           {
             "fieldName": "added",
             "name": "!T_0",
-            "type": "doubleSum"
+            "type": "longSum"
           }
         ],
         "dataSource": "wikipedia",
@@ -609,7 +621,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query).to.deep.equal({
         "aggregations": [
           {
             "name": "Count",
@@ -618,18 +630,19 @@ describe("DruidExternal", () => {
           {
             "fieldName": "added",
             "name": "!T_0",
-            "type": "doubleSum"
+            "type": "longSum"
           },
           {
-            "fieldNames": [
+            "fields": [
               "page"
             ],
             "name": "!T_1",
+            "round": true,
             "type": "cardinality"
           },
           {
             "activate": false,
-            "name": "!T_2",
+            "name": "!T_LOL",
             "the": "borg will rise again",
             "type": "crazy"
           }
@@ -645,6 +658,11 @@ describe("DruidExternal", () => {
         "metric": "Count",
         "postAggregations": [
           {
+            "fieldName": "!T_LOL",
+            "name": "!T_2",
+            "type": "double_up"
+          },
+          {
             "fieldName": "!T_1",
             "name": "!F_!T_1",
             "type": "hyperUniqueCardinality"
@@ -657,12 +675,13 @@ describe("DruidExternal", () => {
                   "!F_!T_1",
                   "Count"
                 ],
-                "function": "function(_$33T_0,_$33T_1,_Count) { return Math.pow(Math.abs(((parseFloat(_$33T_0)/Math.pow(Math.abs(parseFloat(_Count)),0.5))+(parseFloat(_$33T_1)*100))),2); }",
-                "type": "javascript"
+                "function": "function(_$33T_0,_$33T_1,_Count) { return Math.pow(Math.abs(((_=Math.pow(Math.abs(parseFloat(_Count)),0.5),(_===0||isNaN(_)?null:parseFloat(_$33T_0)/Math.pow(Math.abs(parseFloat(_Count)),0.5)))+(parseFloat(_$33T_1)*100))),2); }",
+                "type": "javascript",
+                "name": "dummy"
               },
               {
                 "fieldName": "!T_2",
-                "type": "getSomeCrazy"
+                "type": "fieldAccess"
               }
             ],
             "fn": "+",
@@ -683,56 +702,11 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query).to.deep.equal({
-        "dataSource": "wikipedia",
-        "dimensions": [
-          "sometimeLater",
-          "language",
-          "page",
-          "tags",
-          "commentLength",
-          "isRobot",
-          {
-            "dimension": "page",
-            "extractionFn": {
-              "format": "[%s]",
-              "nullHandling": "returnNull",
-              "type": "stringFormat"
-            },
-            "outputName": "pageInBrackets",
-            "type": "extraction"
-          },
-          {
-            "dimension": "page",
-            "extractionFn": {
-              "index": 0,
-              "length": 3,
-              "type": "substring"
-            },
-            "outputName": "page3",
-            "type": "extraction"
-          }
-        ],
-        "filter": {
-          "dimension": "page",
-          "type": "bound",
-          "upper": "moon",
-          "upperStrict": true
-        },
-        "granularity": "all",
-        "intervals": "2013-02-26T00Z/2013-02-27T00Z",
-        "metrics": [
-          "count",
-          "added",
-          "deleted",
-          "inserted",
-          "delta_hist"
-        ],
-        "pagingSpec": {
-          "pagingIdentifiers": {},
-          "threshold": 5
-        },
-        "queryType": "select"
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
+        "dimension": "page",
+        "type": "bound",
+        "upper": "moon",
+        "upperStrict": true
       });
     });
 
@@ -746,7 +720,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query).to.deep.equal({});
+      expect(druidExternal.getQueryAndPostTransform().query).to.deep.equal({});
     });
 
   });
@@ -761,7 +735,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       expect(() => {
-        ex.external.getQueryAndPostProcess();
+        ex.external.getQueryAndPostTransform();
       }).to.throw(`can not convert $count:NUMBER = 1337 to filter because it references an un-filterable metric 'count' which is most likely rolled up.`);
     });
 
@@ -772,7 +746,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "isRobot",
         "extractionFn": {
           "lookup": {
@@ -798,7 +772,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "field": {
           "dimension": "isRobot",
           "extractionFn": {
@@ -827,7 +801,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "language",
         "type": "selector",
         "value": "en"
@@ -841,7 +815,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "language",
         "type": "in",
         "values": ['en', 'es', 'fr']
@@ -855,7 +829,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "language",
         "type": "selector",
         "value": null
@@ -869,7 +843,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "language",
         "extractionFn": {
           "lookup": "language_lookup",
@@ -891,7 +865,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "language",
         "type": "selector",
         "value": null
@@ -905,7 +879,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "tags",
         "extractionFn": {
           "lookup": "tag_lookup",
@@ -926,7 +900,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "tags",
         "extractionFn": {
           "expr": "[0-9]+",
@@ -948,7 +922,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "tags",
         "extractionFn": {
           "index": 1,
@@ -963,15 +937,15 @@ describe("DruidExternal", () => {
       });
     });
 
-    it("works with .in(NUMBER_RANGE)", () => {
-      let ex = $('wiki').filter($("commentLength").in(10, 30));
+    it("works with .overlap(NUMBER_RANGE)", () => {
+      let ex = $('wiki').filter($("commentLength").overlap(10, 30));
 
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
-        "alphaNumeric": true,
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
+        "ordering": "numeric",
         "dimension": "commentLength",
         "lower": 10,
         "type": "bound",
@@ -987,7 +961,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "commentLength",
         "type": "in",
         "values": [10, 30]
@@ -1001,7 +975,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "language",
         "query": {
           "caseSensitive": false,
@@ -1019,7 +993,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "tags",
         "query": {
           "caseSensitive": false,
@@ -1037,7 +1011,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "language",
         "extractionFn": {
           "lookup": "language_lookup",
@@ -1059,7 +1033,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "field": {
           "dimension": "language",
           "extractionFn": {
@@ -1084,7 +1058,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "language",
         "extractionFn": {
           "format": "[%s]",
@@ -1107,7 +1081,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "language",
         "pattern": "en+",
         "type": "regex"
@@ -1121,7 +1095,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "tags",
         "pattern": "goo+d",
         "type": "regex"
@@ -1129,13 +1103,13 @@ describe("DruidExternal", () => {
     });
 
     it("works with .timePart().in()", () => {
-      let ex = $('wiki').filter($('time').timePart('HOUR_OF_DAY').in([3, 5]));
+      let ex = $('wiki').filter($('time').timePart('HOUR_OF_DAY').is([3, 5]));
 
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "__time",
         "extractionFn": {
           "format": "H",
@@ -1159,7 +1133,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "page",
         "extractionFn": {
           "format": "[%s]",
@@ -1181,7 +1155,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.filter).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.filter).to.deep.equal({
         "dimension": "page",
         "extractionFn": {
           "index": 0,
@@ -1205,7 +1179,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       expect(() => {
-        ex.external.getQueryAndPostProcess();
+        ex.external.getQueryAndPostTransform();
       }).to.throw(`can not convert $count:NUMBER to split because it references an un-splitable metric 'count' which is most likely rolled up.`);
     });
 
@@ -1215,12 +1189,49 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "page",
         "outputName": "Split",
         "type": "default"
+      });
+    });
+
+    it("works with constant", () => {
+      let ex = $('wiki').split('hello', 'C');
+
+      ex = ex.referenceCheck(context).resolve(context).simplify();
+
+      expect(ex.op).to.equal('external');
+      let query = ex.external.getQueryAndPostTransform().query;
+      expect(query.queryType).to.equal('topN');
+      expect(query.dimension).to.deep.equal({
+        "dimension": "__time",
+        "extractionFn": {
+          "lookup": {
+            "map": {},
+            "type": "map"
+          },
+          "replaceMissingValueWith": "hello",
+          "retainMissingValue": false,
+          "type": "lookup"
+        },
+        "outputName": "C",
+        "type": "extraction"
+      });
+    });
+
+    it.skip("works with derived constant", () => {
+      let ex = $('wiki').split('$constant', 'C');
+
+      ex = ex.referenceCheck(context).resolve(context).simplify();
+
+      expect(ex.op).to.equal('external');
+      let query = ex.external.getQueryAndPostTransform().query;
+      //expect(query.queryType).to.equal('topN');
+      expect(query).to.deep.equal({
+
       });
     });
 
@@ -1230,7 +1241,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('topN');
       expect(query.dimension).to.deep.equal({
         "dimension": "isRobot",
@@ -1257,7 +1268,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "page",
@@ -1272,7 +1283,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "page",
@@ -1292,7 +1303,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "page",
@@ -1312,7 +1323,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "page",
@@ -1332,7 +1343,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "page",
@@ -1352,7 +1363,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "page",
@@ -1382,7 +1393,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "page",
@@ -1402,7 +1413,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "page",
@@ -1423,7 +1434,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "page",
@@ -1442,7 +1453,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "page",
@@ -1461,7 +1472,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "page",
@@ -1481,7 +1492,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "page",
@@ -1501,7 +1512,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "page",
@@ -1531,7 +1542,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('topN');
       expect(query.dimension).to.deep.equal({
         "dimension": "page",
@@ -1560,7 +1571,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "tags",
@@ -1579,7 +1590,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('topN');
       expect(query.dimension).to.deep.equal({
         "dimension": "tags",
@@ -1607,7 +1618,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "commentLength",
@@ -1616,6 +1627,7 @@ describe("DruidExternal", () => {
           "type": "javascript"
         },
         "outputName": "Split",
+        "outputType": "FLOAT",
         "type": "extraction"
       });
     });
@@ -1626,7 +1638,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "commentLength",
@@ -1635,6 +1647,7 @@ describe("DruidExternal", () => {
           "type": "javascript"
         },
         "outputName": "Split",
+        "outputType": "FLOAT",
         "type": "extraction"
       });
     });
@@ -1645,7 +1658,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "commentLength",
@@ -1665,7 +1678,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "commentLength",
@@ -1696,13 +1709,17 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "sometimeLater",
         "extractionFn": {
-          "format": "yyyy-MM-dd'Z",
-          "locale": "en-US",
+          "format": "yyyy-MM-dd'T'HH:mm:ss'Z",
+          "granularity": {
+            "period": "P1D",
+            "timeZone": "Etc/UTC",
+            "type": "period"
+          },
           "timeZone": "Etc/UTC",
           "type": "timeFormat"
         },
@@ -1720,7 +1737,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "__time",
@@ -1731,6 +1748,7 @@ describe("DruidExternal", () => {
           "type": "timeFormat"
         },
         "outputName": "Split1",
+        "outputType": "LONG",
         "type": "extraction"
       });
     });
@@ -1741,7 +1759,7 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query.dimensions[0]).to.deep.equal({
         "dimension": "page",
@@ -1762,15 +1780,9 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query).to.deep.equal({
-        "aggregations": [
-          {
-            "name": "!DUMMY",
-            "type": "count"
-          }
-        ],
         "dataSource": "wikipedia",
         "dimensions": [
           {
@@ -1806,15 +1818,9 @@ describe("DruidExternal", () => {
       ex = ex.referenceCheck(context).resolve(context).simplify();
 
       expect(ex.op).to.equal('external');
-      let query = ex.external.getQueryAndPostProcess().query;
+      let query = ex.external.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('groupBy');
       expect(query).to.deep.equal({
-        "aggregations": [
-          {
-            "name": "!DUMMY",
-            "type": "count"
-          }
-        ],
         "dataSource": "wikipedia",
         "dimensions": [
           {
@@ -1853,13 +1859,13 @@ describe("DruidExternal", () => {
       expect(ex.op).to.equal('literal');
       let druidExternal = ex.value.getReadyExternals()[0].external;
 
-      let query = druidExternal.getQueryAndPostProcess().query;
+      let query = druidExternal.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('timeseries');
       expect(query.aggregations[1]).to.deep.equal({
         "aggregator": {
           "fieldName": "count",
           "name": "Test",
-          "type": "doubleSum"
+          "type": "longSum"
         },
         "filter": {
           "dimension": "isRobot",
@@ -1893,7 +1899,7 @@ describe("DruidExternal", () => {
       expect(ex.op).to.equal('literal');
       let druidExternal = ex.value.getReadyExternals()[0].external;
 
-      let query = druidExternal.getQueryAndPostProcess().query;
+      let query = druidExternal.getQueryAndPostTransform().query;
       expect(query.queryType).to.equal('timeseries');
       expect(query.aggregations).to.deep.equal([
         {
@@ -1939,24 +1945,42 @@ describe("DruidExternal", () => {
       ]);
     });
 
+    it("works with quantile agg + tuning", () => {
+      let ex = ply()
+        .apply('P95', $('wiki').quantile('$delta_hist', 0.95, 'resolution=51,numBuckets=8,lowerLimit=0,upperLimit=300'))
+        .apply('P99', $('wiki').quantile('$delta_hist', 0.99, 'resolution=52,numBuckets=9'));
+
+      ex = ex.referenceCheck(context).resolve(context).simplify();
+
+      expect(ex.op).to.equal('literal');
+      let druidExternal = ex.value.getReadyExternals()[0].external;
+
+      let query = druidExternal.getQueryAndPostTransform().query;
+      expect(query.queryType).to.equal('timeseries');
+      expect(query.aggregations).to.deep.equal([
+        {
+          "fieldName": "delta_hist",
+          "lowerLimit": 0,
+          "name": "!H_P95",
+          "numBuckets": 8,
+          "resolution": 51,
+          "type": "approxHistogramFold",
+          "upperLimit": 300
+        },
+        {
+          "fieldName": "delta_hist",
+          "name": "!H_P99",
+          "numBuckets": 9,
+          "resolution": 52,
+          "type": "approxHistogramFold"
+        }
+      ]);
+    });
+
   });
 
 
-  describe("should work when getting back [] and [{result:[]}]", () => {
-    let nullExternal = External.fromJS({
-      engine: 'druid',
-      source: 'wikipedia',
-      timeAttribute: 'time',
-      allowSelectQueries: true,
-      attributes: [
-        { name: 'time', type: 'TIME' },
-        { name: 'language', type: 'STRING' },
-        { name: 'page', type: 'STRING' },
-        { name: 'added', type: 'NUMBER' }
-      ],
-      filter: timeFilter
-    }, () => Q([]));
-
+  describe("should work when getting back no data", () => {
     let emptyExternal = External.fromJS({
       engine: 'druid',
       source: 'wikipedia',
@@ -1969,114 +1993,73 @@ describe("DruidExternal", () => {
         { name: 'added', type: 'NUMBER' }
       ],
       filter: timeFilter
-    }, ({ query }) => {
-      if (query.queryType === 'select') {
-        return Q([
-          {
-            "timestamp": "2016-03-15T23:00:00.458Z",
-            "result": {
-              "pagingIdentifiers": {
-                "wikipedia_2016-03-15T23:00:00.000Z_2016-03-16T00:00:00.000Z_2016-03-15T23:00:00.000Z": 0
-              },
-              "events": []
-            }
-          }
-        ]);
-      } else {
-        return Q([{ result: [] }]);
-      }
+    }, () => {
+      const stream = new PassThrough({ objectMode: true });
+      setTimeout(() => { stream.end(); }, 1);
+      return stream;
     });
 
-    describe("should return null correctly on a totals query", () => {
+    it("should return null correctly on a totals query", () => {
       let ex = ply()
         .apply('Count', '$wiki.count()');
 
-      it("works with [] return", () => {
-        return ex.compute({ wiki: nullExternal })
-          .then((result) => {
-            expect(result.toJS()).to.deep.equal([
-              { Count: 0 }
-            ]);
-          });
-      });
+      return ex.compute({ wiki: emptyExternal })
+        .then((result) => {
+          expect(result.toJS().data).to.deep.equal([
+            { Count: 0 }
+          ]);
+        });
     });
 
-    describe("should return null correctly on a timeseries query", () => {
+    it("should return null correctly on a timeseries query", () => {
       let ex = $('wiki').split("$time.timeBucket(P1D, 'Etc/UTC')", 'Time')
         .apply('Count', '$wiki.count()')
         .sort('$Time', 'ascending');
 
-      it("works with [] return", () => {
-        return ex.compute({ wiki: nullExternal })
-          .then((result) => {
-            expect(result.toJS()).to.deep.equal([]);
-          });
-      });
+      return ex.compute({ wiki: emptyExternal })
+        .then((result) => {
+          expect(result.toJS().data).to.deep.equal([]);
+        });
     });
 
-    describe("should return null correctly on a topN query", () => {
+    it("should return null correctly on a topN query", () => {
       let ex = $('wiki').split("$page", 'Page')
         .apply('Count', '$wiki.count()')
         .apply('Added', '$wiki.sum($added)')
         .sort('$Count', 'descending')
         .limit(5);
 
-      it("works with [] return", () => {
-        return ex.compute({ wiki: nullExternal })
-          .then((result) => {
-            expect(result.toJS()).to.deep.equal([]);
-          });
-      });
-
-      it("works with [{result:[]}] return", () => {
-        return ex.compute({ wiki: emptyExternal })
-          .then((result) => {
-            expect(result.toJS()).to.deep.equal([]);
-          });
-      });
+      return ex.compute({ wiki: emptyExternal })
+        .then((result) => {
+          expect(result.toJS().data).to.deep.equal([]);
+        });
     });
 
-    describe("should return null correctly on a select query", () => {
+    it("should return null correctly on a select query", () => {
       let ex = $('wiki');
 
-      it("works with [] return", () => {
-        return ex.compute({ wiki: nullExternal })
-          .then((result) => {
-            expect(AttributeInfo.toJSs(result.attributes)).to.deep.equal([
-              { name: 'time', type: 'TIME' },
-              { name: 'language', type: 'STRING' },
-              { name: 'page', type: 'STRING' },
-              { name: 'added', type: 'NUMBER' }
-            ]);
+      return ex.compute({ wiki: emptyExternal })
+        .then((result) => {
+          expect(AttributeInfo.toJSs(result.attributes)).to.deep.equal([
+            { name: 'time', type: 'TIME' },
+            { name: 'language', type: 'STRING' },
+            { name: 'page', type: 'STRING' },
+            { name: 'added', type: 'NUMBER' }
+          ]);
 
-            expect(result.toJS()).to.deep.equal([]);
-            expect(result.toCSV()).to.equal('time,language,page,added');
-          });
-      });
-
-      it("works with [{result:[]}] return", () => {
-        return ex.compute({ wiki: emptyExternal })
-          .then((result) => {
-            expect(AttributeInfo.toJSs(result.attributes)).to.deep.equal([
-              { name: 'time', type: 'TIME' },
-              { name: 'language', type: 'STRING' },
-              { name: 'page', type: 'STRING' },
-              { name: 'added', type: 'NUMBER' }
-            ]);
-
-            expect(result.toJS()).to.deep.equal([]);
-            expect(result.toCSV()).to.equal('time,language,page,added');
-          });
-      });
+          expect(result.toJS().data).to.deep.equal([]);
+          expect(result.toCSV()).to.equal('time,language,page,added');
+        });
     });
   });
 
 
-  describe("should work when getting back crap data", () => {
-    let crapExternal = External.fromJS({
+  describe("should work when getting back an error", () => {
+    let errorExternal = External.fromJS({
       engine: 'druid',
       source: 'wikipedia',
       timeAttribute: 'time',
+      allowSelectQueries: true,
       attributes: [
         { name: 'time', type: 'TIME' },
         { name: 'language', type: 'STRING' },
@@ -2084,46 +2067,89 @@ describe("DruidExternal", () => {
         { name: 'added', type: 'NUMBER' }
       ],
       filter: timeFilter
-    }, (query) => Q("[Does this look like data to you?"));
+    }, () => {
+      const stream = new PassThrough({ objectMode: true });
+      setTimeout(() => {
+        stream.emit('error', new Error('something went wrong'));
+        stream.end();
+      }, 1);
+      return stream;
+    });
 
-    it("works with value query", () => {
+    it("should return null correctly on a totals query", () => {
       let ex = ply()
         .apply('Count', '$wiki.count()');
 
-      return ex.compute({ wiki: crapExternal })
-        .then(() => {
+      return ex.compute({ wiki: errorExternal })
+        .then((result) => {
           throw new Error('DID_NOT_ERROR');
         })
-        .catch((err) => {
-          expect(err.message).to.equal('unexpected result from Druid (all / value)');
+        .catch(e => {
+          expect(e.message).to.equal('something went wrong');
         });
     });
 
-    it("works with all query", () => {
-      let ex = ply()
-        .apply('Count', '$wiki.count()')
-        .apply('Added', '$wiki.sum($added)');
-
-      return ex.compute({ wiki: crapExternal })
-        .then(() => {
-          throw new Error('DID_NOT_ERROR');
-        })
-        .catch((err) => {
-          expect(err.message).to.equal('unexpected result from Druid (all)');
-        });
-    });
-
-    it("works with timeseries query", () => {
+    it("should return null correctly on a timeseries query", () => {
       let ex = $('wiki').split("$time.timeBucket(P1D, 'Etc/UTC')", 'Time')
         .apply('Count', '$wiki.count()')
         .sort('$Time', 'ascending');
 
-      return ex.compute({ wiki: crapExternal })
-        .then(() => {
+      return ex.compute({ wiki: errorExternal })
+        .then((result) => {
           throw new Error('DID_NOT_ERROR');
         })
-        .catch((err) => {
-          expect(err.message).to.equal('unexpected result from Druid (timeseries)');
+        .catch(e => {
+          expect(e.message).to.equal('something went wrong');
+        });
+    });
+
+    it("should return null correctly on a topN query", () => {
+      let ex = $('wiki').split("$page", 'Page')
+        .apply('Count', '$wiki.count()')
+        .apply('Added', '$wiki.sum($added)')
+        .sort('$Count', 'descending')
+        .limit(5);
+
+      return ex.compute({ wiki: errorExternal })
+        .then((result) => {
+          throw new Error('DID_NOT_ERROR');
+        })
+        .catch(e => {
+          expect(e.message).to.equal('something went wrong');
+        });
+    });
+
+    it("should return null correctly on a select query", () => {
+      let ex = $('wiki');
+
+      return ex.compute({ wiki: errorExternal })
+        .then((result) => {
+          throw new Error('DID_NOT_ERROR');
+        })
+        .catch(e => {
+          expect(e.message).to.equal('something went wrong');
+        });
+    });
+
+    it("should return null correctly on a double split", () => {
+      let ex = $('wiki').split("$page", 'Page')
+        .apply('Count', '$wiki.count()')
+        .apply('Added', '$wiki.sum($added)')
+        .sort('$Count', 'descending')
+        .limit(5)
+        .apply(
+          'times',
+          $('wiki').split("$time.timeBucket(P1D, 'Etc/UTC')", 'Time')
+            .apply('Count', '$wiki.count()')
+            .sort('$Time', 'ascending')
+        );
+
+      return ex.compute({ wiki: errorExternal })
+        .then((result) => {
+          throw new Error('DID_NOT_ERROR');
+        })
+        .catch(e => {
+          expect(e.message).to.equal('something went wrong');
         });
     });
 
@@ -2154,7 +2180,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.context).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.context).to.deep.equal({
         hello: "world"
       })
     });
@@ -2179,7 +2205,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.context).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.context).to.deep.equal({
         skipEmptyBuckets: "true"
       })
     });
@@ -2207,7 +2233,7 @@ describe("DruidExternal", () => {
 
       expect(ex.op).to.equal('external');
       let druidExternal = ex.external;
-      expect(druidExternal.getQueryAndPostProcess().query.context).to.deep.equal({
+      expect(druidExternal.getQueryAndPostTransform().query.context).to.deep.equal({
         skipEmptyBuckets: "false"
       })
     });
@@ -2223,11 +2249,10 @@ describe("DruidExternal", () => {
     ex = ex.referenceCheck(context).resolve(context).simplify();
 
     let external = ex.operand.external;
-    expect(external.getQueryAndPostProcess().query).to.deep.equal({
+    expect(external.getQueryAndPostTransform().query).to.deep.equal({
       "dataSource": "wikipedia",
       "dimensions": [
         "page",
-        "commentLength",
         {
           "dimension": "commentLength",
           "extractionFn": {
@@ -2246,6 +2271,7 @@ describe("DruidExternal", () => {
       "granularity": "all",
       "intervals": "2013-02-26T00Z/2013-02-27T00Z",
       "metrics": [
+        "commentLength",
         "added"
       ],
       "pagingSpec": {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2016 Imply Data, Inc.
+ * Copyright 2016-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,9 @@
  */
 
 
-
-import { r, ExpressionJS, ExpressionValue, Expression, ChainableExpression } from './baseExpression';
-import { Indexer, Alterations } from './baseExpression';
+import { PlywoodValue, Set } from '../datatypes/index';
 import { SQLDialect } from '../dialect/baseDialect';
-import { PlywoodValue } from '../datatypes/index';
-import { MatchExpression } from './matchExpression';
+import { ChainableExpression, Expression, ExpressionJS, ExpressionValue } from './baseExpression';
 
 export class ExtractExpression extends ChainableExpression {
   static op = "Extract";
@@ -36,7 +33,7 @@ export class ExtractExpression extends ChainableExpression {
     super(parameters, dummyObject);
     this.regexp = parameters.regexp;
     this._ensureOp("extract");
-    this._checkOperandTypes('STRING', 'SET/STRING');
+    this._checkOperandTypes('STRING');
     this.type = this.operand.type;
   }
 
@@ -62,8 +59,9 @@ export class ExtractExpression extends ChainableExpression {
   }
 
   protected _calcChainableHelper(operandValue: any): PlywoodValue {
+    if (!operandValue) return null;
     let re = new RegExp(this.regexp);
-    return (String(operandValue).match(re) || [])[1] || null;
+    return Set.crossUnary(operandValue, (a) => (String(a).match(re) || [])[1] || null);
   }
 
   protected _getJSChainableHelper(operandJS: string): string {

@@ -1,6 +1,6 @@
 /*
  * Copyright 2012-2015 Metamarkets Group Inc.
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,15 +15,15 @@
  * limitations under the License.
  */
 
+import * as hasOwnProp from 'has-own-prop';
 import { SimpleArray } from 'immutable-class';
-import { Expression, ExpressionValue, ExpressionJS, Alterations, Indexer } from './baseExpression';
-import { PlyType, DatasetFullType, PlyTypeSingleValue, FullType } from '../types';
-import { SQLDialect } from '../dialect/baseDialect';
-import { hasOwnProperty, repeat } from '../helper/utils';
-import { PlywoodValue } from '../datatypes/index';
-import { Datum, ComputeFn } from '../datatypes/dataset';
+import { ComputeFn, Datum, PlywoodValue } from '../datatypes/index';
+import { SQLDialect } from '../dialect/index';
+import { repeat } from '../helper/index';
+import { DatasetFullType, PlyType } from '../types';
+import { Expression, ExpressionJS, ExpressionValue } from './baseExpression';
 
-export const POSSIBLE_TYPES: Lookup<number> = {
+export const POSSIBLE_TYPES: Record<string, number> = {
   'NULL': 1,
   'BOOLEAN': 1,
   'NUMBER': 1,
@@ -51,7 +51,7 @@ export class RefExpression extends Expression {
   static op = "Ref";
   static fromJS(parameters: ExpressionJS): RefExpression {
     let value: ExpressionValue;
-    if (hasOwnProperty(parameters, 'nest')) {
+    if (hasOwnProp(parameters, 'nest')) {
       value = <any>parameters;
     } else {
       value = {
@@ -93,7 +93,7 @@ export class RefExpression extends Expression {
   }
 
   static validType(typeName: string): boolean {
-    return hasOwnProperty(POSSIBLE_TYPES, typeName);
+    return hasOwnProp(POSSIBLE_TYPES, typeName);
   }
 
   static toJavaScriptSafeName(variableName: string): string {
@@ -104,7 +104,7 @@ export class RefExpression extends Expression {
   }
 
   static findProperty(obj: any, key: string): any {
-    return hasOwnProperty(obj, key) ? key : null;
+    return hasOwnProp(obj, key) ? key : null;
   }
 
   static findPropertyCI(obj: any, key: string): any {
@@ -213,13 +213,18 @@ export class RefExpression extends Expression {
       expr = RefExpression.toJavaScriptSafeName(name);
     }
 
-    if (this.type === 'NUMBER') expr = `parseFloat(${expr})`;
-    return expr;
+    switch (this.type) {
+      case 'NUMBER':
+        return `parseFloat(${expr})`;
+
+      default:
+        return expr;
+    }
   }
 
   public getSQL(dialect: SQLDialect, minimal = false): string {
     if (this.nest) throw new Error(`can not call getSQL on unresolved expression: ${this}`);
-    return dialect.escapeName(this.name);
+    return dialect.maybeNamespacedName(this.name);
   }
 
   public equals(other: RefExpression): boolean {
@@ -235,19 +240,19 @@ export class RefExpression extends Expression {
     let myTypeContext = typeContext;
     for (let i = nest; i > 0; i--) {
       myTypeContext = myTypeContext.parent;
-      if (!myTypeContext) throw new Error('went too deep on ' + this.toString());
+      if (!myTypeContext) throw new Error(`went too deep on ${this}`);
     }
 
     let myName = ignoreCase ? RefExpression.findPropertyCI(myTypeContext.datasetType, name) : name;
-    if (myName == null) throw new Error('could not resolve ' + this.toString());
+    if (myName == null) throw new Error(`could not resolve ${this}`);
     // Look for the reference in the parent chain
     let nestDiff = 0;
-    while (myTypeContext && !hasOwnProperty(myTypeContext.datasetType, myName)) {
+    while (myTypeContext && !hasOwnProp(myTypeContext.datasetType, myName)) {
       myTypeContext = myTypeContext.parent;
       nestDiff++;
     }
     if (!myTypeContext) {
-      throw new Error('could not resolve ' + this.toString());
+      throw new Error(`could not resolve ${this}`);
     }
 
     let myFullType = myTypeContext.datasetType[myName];

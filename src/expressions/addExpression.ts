@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2016 Imply Data, Inc.
+ * Copyright 2016-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-import { r, ExpressionJS, ExpressionValue, Expression, ChainableUnaryExpression } from './baseExpression';
-import { PlywoodValue } from '../datatypes/index';
+import { PlywoodValue, Set } from '../datatypes/index';
 import { SQLDialect } from '../dialect/baseDialect';
+import { ChainableUnaryExpression, Expression, ExpressionJS, ExpressionValue } from './baseExpression';
 
 export class AddExpression extends ChainableUnaryExpression {
   static op = "Add";
@@ -33,7 +33,8 @@ export class AddExpression extends ChainableUnaryExpression {
   }
 
   protected _calcChainableUnaryHelper(operandValue: any, expressionValue: any): PlywoodValue {
-    return (operandValue || 0) + (expressionValue || 0);
+    if (operandValue === null || expressionValue === null) return null;
+    return Set.crossBinary(operandValue, expressionValue, (a, b) => a + b);
   }
 
   protected _getJSChainableUnaryHelper(operandJS: string, expressionJS: string): string {

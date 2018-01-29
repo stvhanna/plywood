@@ -1,6 +1,6 @@
 /*
  * Copyright 2012-2015 Metamarkets Group Inc.
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,17 @@
  */
 
 import { Timezone } from 'chronoshift';
+import { PlyType } from '../types';
 
 const BOUNDS_REG_EXP = /^[\[(][\])]$/;
 
 export type PlywoodRange = Range<number | Date | string>;
+
+export interface PlywoodRangeJS {
+  start: null | number | Date | string;
+  end: null | number | Date | string;
+  bounds?: string;
+}
 
 export abstract class Range<T> {
   static DEFAULT_BOUNDS = '[)';
@@ -28,15 +35,23 @@ export abstract class Range<T> {
     return candidate instanceof Range;
   }
 
-  static classMap: Lookup<typeof Range> = {};
+  static isRangeType(type: PlyType): boolean {
+    return type && type.indexOf('_RANGE') > 0;
+  }
 
-  static register(ctr: typeof Range): void {
+  static unwrapRangeType(type: PlyType): PlyType | null {
+    if (!type) return null;
+    return Range.isRangeType(type) ? <PlyType>type.substr(0, type.length - 6) : type;
+  }
+
+  static classMap: Record<string, typeof Range> = {};
+
+  static register(ctr: any): void {
     let rangeType = (<any>ctr).type.replace('_RANGE', '').toLowerCase();
     Range.classMap[rangeType] = ctr;
   }
 
-  // ToDo: enforce stricter typing here
-  static fromJS(parameters: any): PlywoodRange {
+  static fromJS(parameters: PlywoodRangeJS): PlywoodRange {
     let ctr: string;
     if (typeof parameters.start === 'number' || typeof parameters.end === 'number') {
       ctr = 'number';
@@ -105,6 +120,12 @@ export abstract class Range<T> {
 
   public abstract equals(other: Range<T>): boolean;
 
+  public abstract toJS(): PlywoodRangeJS;
+
+  public toJSON(): any {
+    return this.toJS();
+  }
+
   public toString(tz?: Timezone): string {
     let bounds = this.bounds;
     return '[' + (bounds[0] === '(' ? '~' : '') + this._endpointToString(this.start, tz) + ',' + this._endpointToString(this.end, tz) + (bounds[1] === ')' ? '' : '!') + ']';
@@ -132,8 +153,36 @@ export abstract class Range<T> {
     return this._endpointEqual(this.start, this.end) && this.bounds === '[]';
   }
 
-  public contains(val: T): boolean {
+  public contains(val: T | Range<T>): boolean {
+    if (val instanceof Range) {
+      let valStart = val.start;
+      let valEnd = val.end;
+      let valBound = val.bounds;
+      if (valBound[0] === '[') {
+        if (!this.containsValue(valStart)) return false;
+      } else {
+        if (!this.containsValue(valStart) && valStart.valueOf() !== this.start.valueOf()) return false;
+      }
+      if (valBound[1] === ']') {
+        if (!this.containsValue(valEnd)) return false;
+      } else {
+        if (!this.containsValue(valEnd) && valEnd.valueOf() !== this.end.valueOf()) return false;
+      }
+      return true;
+
+    } else {
+      return this.containsValue(val);
+    }
+  }
+
+  protected validMemberType(val: any): boolean {
+    return typeof val === 'number';
+  }
+
+  public containsValue(val: T): boolean {
     if (val === null) return false;
+    val = (val as any).valueOf(); // Turn a Date into a number
+    if (!this.validMemberType(val)) return false;
 
     let start = this.start;
     let end = this.end;
@@ -153,8 +202,10 @@ export abstract class Range<T> {
   }
 
   public intersects(other: Range<T>): boolean {
-    return this.contains(other.start) || this.contains(other.end)
-      || other.contains(this.start) || other.contains(this.end)
+    return this.containsValue(other.start)
+      || this.containsValue(other.end)
+      || other.containsValue(this.start)
+      || other.containsValue(this.end)
       || this._equalsHelper(other); // in case of (0, 1) and (0, 1)
   }
 

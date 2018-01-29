@@ -1,6 +1,6 @@
 /*
  * Copyright 2012-2015 Metamarkets Group Inc.
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,23 +16,23 @@
  */
 
 import { Timezone } from 'chronoshift';
-import { Class, Instance } from 'immutable-class';
+import * as hasOwnProp from 'has-own-prop';
+import { Class, Instance, generalEqual } from 'immutable-class';
 import { PlyType } from '../types';
-import { hasOwnProperty } from '../helper/utils';
-import { getValueType, isSetType, valueToJS, valueFromJS } from './common';
-import { PlywoodRange } from './range';
+import { getValueType, valueFromJS, valueToJS } from './common';
+import { PlywoodValue } from './dataset';
 import { NumberRange } from './numberRange';
-import { TimeRange } from './timeRange';
+import { PlywoodRange, Range } from './range';
 import { StringRange } from './stringRange';
-import { isDate } from 'chronoshift';
+import { TimeRange } from './timeRange';
 
 export interface SetValue {
-  setType: string;
+  setType: PlyType;
   elements: Array<any>; // These are value any
 }
 
 export interface SetJS {
-  setType: string;
+  setType: PlyType;
   elements: Array<any>; // These are JS any
 }
 
@@ -44,35 +44,7 @@ function arrayFromJS(xs: Array<any>, setType: string): Array<any> {
   return xs.map(x => valueFromJS(x, setType));
 }
 
-function unifyElements(elements: Array<PlywoodRange>): Array<PlywoodRange> {
-  let newElements: Lookup<PlywoodRange> = Object.create(null);
-  for (let accumulator of elements) {
-    let newElementsKeys = Object.keys(newElements);
-    for (let newElementsKey of newElementsKeys) {
-      let newElement = newElements[newElementsKey];
-      let unionElement = accumulator.union(newElement);
-      if (unionElement) {
-        accumulator = unionElement;
-        delete newElements[newElementsKey];
-      }
-    }
-    newElements[accumulator.toString()] = accumulator;
-  }
-  return Object.keys(newElements).map(k => newElements[k]);
-}
-
-function intersectElements(elements1: Array<PlywoodRange>, elements2: Array<PlywoodRange>): Array<PlywoodRange> {
-  let newElements: Array<PlywoodRange> = [];
-  for (let element1 of elements1) {
-    for (let element2 of elements2) {
-      let intersect = element1.intersect(element2);
-      if (intersect) newElements.push(intersect);
-    }
-  }
-  return newElements;
-}
-
-let typeUpgrades: Lookup<string> = {
+let typeUpgrades: Record<string, string> = {
   'NUMBER': 'NUMBER_RANGE',
   'TIME': 'TIME_RANGE',
   'STRING': 'STRING_RANGE'
@@ -83,17 +55,114 @@ export class Set implements Instance<SetValue, SetJS> {
   static type = 'SET';
   static EMPTY: Set;
 
+  static unifyElements(elements: Array<PlywoodRange>): Array<PlywoodRange> {
+    let newElements: Record<string, PlywoodRange> = Object.create(null);
+    for (let accumulator of elements) {
+      let newElementsKeys = Object.keys(newElements);
+      for (let newElementsKey of newElementsKeys) {
+        let newElement = newElements[newElementsKey];
+        let unionElement = accumulator.union(newElement);
+        if (unionElement) {
+          accumulator = unionElement;
+          delete newElements[newElementsKey];
+        }
+      }
+      newElements[accumulator.toString()] = accumulator;
+    }
+    const newElementsKeys = Object.keys(newElements);
+    return newElementsKeys.length < elements.length ? newElementsKeys.map(k => newElements[k]) : elements;
+  }
+
+  static intersectElements(elements1: Array<PlywoodRange>, elements2: Array<PlywoodRange>): Array<PlywoodRange> {
+    let newElements: Array<PlywoodRange> = [];
+    for (let element1 of elements1) {
+      for (let element2 of elements2) {
+        let intersect = element1.intersect(element2);
+        if (intersect) newElements.push(intersect);
+      }
+    }
+    return newElements;
+  }
+
   static isSet(candidate: any): candidate is Set {
     return candidate instanceof Set;
   }
 
+  static isAtomicType(type: PlyType): boolean {
+    return type && type !== 'NULL' && type.indexOf('SET/') === -1;
+  }
+
+  static isSetType(type: PlyType): boolean {
+    return type && type.indexOf('SET/') === 0;
+  }
+
+  static wrapSetType(type: PlyType): PlyType {
+    if (!type) return null;
+    return Set.isSetType(type) ? type : <PlyType>('SET/' + type);
+  }
+
+  static unwrapSetType(type: PlyType): PlyType {
+    if (!type) return null;
+    return Set.isSetType(type) ? <PlyType>type.substr(4) : type;
+  }
+
+  static cartesianProductOf<T>(...args: T[][]): T[][] {
+    return args.reduce((a, b) => {
+      return [].concat.apply([], a.map((x) => {
+        return b.map((y) => {
+          return x.concat([y]);
+        });
+      }));
+    }, [[]]);
+  }
+
+  static crossBinary(as: any, bs: any, fn: (a: any, b: any) => any): any {
+    if (as instanceof Set || bs instanceof Set) {
+      const aElements = as instanceof Set ? as.elements : [as];
+      const bElements = bs instanceof Set ? bs.elements : [bs];
+      const cp = Set.cartesianProductOf(aElements, bElements);
+      return Set.fromJS(cp.map((v) => fn(v[0], v[1])));
+    } else {
+      return fn(as, bs);
+    }
+  }
+
+  static crossBinaryBoolean(as: any, bs: any, fn: (a: any, b: any) => boolean): boolean {
+    if (as instanceof Set || bs instanceof Set) {
+      const aElements = as instanceof Set ? as.elements : [as];
+      const bElements = bs instanceof Set ? bs.elements : [bs];
+      const cp = Set.cartesianProductOf(aElements, bElements);
+      return cp.some((v) => fn(v[0], v[1]));
+    } else {
+      return fn(as, bs);
+    }
+  }
+
+  static crossUnary(as: any, fn: (a: any) => any): any {
+    if (as instanceof Set) {
+      const aElements = as instanceof Set ? as.elements : [as];
+      return Set.fromJS(aElements.map((a) => fn(a)));
+    } else {
+      return fn(as);
+    }
+  }
+
+  static crossUnaryBoolean(as: any, fn: (a: any) => boolean): boolean {
+    if (as instanceof Set) {
+      const aElements = as instanceof Set ? as.elements : [as];
+      return aElements.some((a) => fn(a));
+    } else {
+      return fn(as);
+    }
+  }
+
   static convertToSet(thing: any): Set {
     let thingType = getValueType(thing);
-    if (isSetType(thingType)) return thing;
+    if (Set.isSetType(thingType)) return thing;
     return Set.fromJS({ setType: thingType, elements: [thing] });
   }
 
-  static generalUnion(a: any, b: any): any {
+  static unionCover(a: any, b: any): any {
     let aSet = Set.convertToSet(a);
     let bSet = Set.convertToSet(b);
     let aSetType = aSet.setType;
@@ -107,10 +176,10 @@ export class Set implements Instance<SetValue, SetJS> {
       return null;
     }
 
-    return aSet.union(bSet).simplify();
+    return aSet.union(bSet).simplifyCover();
   }
 
-  static generalIntersect(a: any, b: any): any {
+  static intersectCover(a: any, b: any): any {
     let aSet = Set.convertToSet(a);
     let bSet = Set.convertToSet(b);
     let aSetType = aSet.setType;
@@ -124,7 +193,11 @@ export class Set implements Instance<SetValue, SetJS> {
       return null;
     }
 
-    return aSet.intersect(bSet).simplify();
+    return aSet.intersect(bSet).simplifyCover();
+  }
+
+  static fromPlywoodValue(pv: PlywoodValue) {
+    return pv instanceof Set ? pv : Set.fromJS([pv]);
   }
 
   static fromJS(parameters: Array<any>): Set;
@@ -147,11 +220,11 @@ export class Set implements Instance<SetValue, SetJS> {
     });
   }
 
-  public setType: string;
+  public setType: PlyType;
   public elements: Array<any>;
 
   private keyFn: (v: any) => string;
-  private hash: Lookup<any>;
+  private hash: Record<string, any>;
 
   constructor(parameters: SetValue) {
     let setType = parameters.setType;
@@ -161,7 +234,7 @@ export class Set implements Instance<SetValue, SetJS> {
 
     let elements = parameters.elements;
     let newElements: any[] = null;
-    let hash: Lookup<any> = Object.create(null);
+    let hash: Record<string, any> = Object.create(null);
     for (let i = 0; i < elements.length; i++) {
       let element = elements[i];
       let key = keyFn(element);
@@ -223,6 +296,7 @@ export class Set implements Instance<SetValue, SetJS> {
   }
 
   public changeElements(elements: any[]): Set {
+    if (this.elements === elements) return this;
     let value = this.valueOf();
     value.elements = elements;
     return new Set(value);
@@ -245,18 +319,12 @@ export class Set implements Instance<SetValue, SetJS> {
   }
 
   public unifyElements(): Set {
-    const { setType } = this;
-    if (setType === 'NUMBER_RANGE' || setType === 'TIME_RANGE' || setType === 'STRING_RANGE') {
-      let value = this.valueOf();
-      value.elements = unifyElements(value.elements);
-      return new Set(value);
-    }
-    return this;
+    return Range.isRangeType(this.setType) ? this.changeElements(Set.unifyElements(this.elements)) : this;
   }
 
-  public simplify(): any {
-    let simpleSet = this.downgradeType();
-    let simpleSetElements = simpleSet.elements;
+  public simplifyCover(): PlywoodValue {
+    const simpleSet = this.unifyElements().downgradeType();
+    const simpleSetElements = simpleSet.elements;
     return simpleSetElements.length === 1 ? simpleSetElements[0] : simpleSet;
   }
 
@@ -286,28 +354,25 @@ export class Set implements Instance<SetValue, SetJS> {
   }
 
   public downgradeType(): Set {
-    if (this.setType === 'NUMBER_RANGE' || this.setType === 'TIME_RANGE' || this.setType === 'STRING_RANGE') {
-      let elements = this.elements;
-      let simpleElements: any[] = [];
-      for (let element of elements) {
-        if (element.degenerate()) {
-          simpleElements.push(element.start);
-        } else {
-          return this;
-        }
+    if (!Range.isRangeType(this.setType)) return this;
+    let elements = this.elements;
+    let simpleElements: any[] = [];
+    for (let element of elements) {
+      if (element.degenerate()) {
+        simpleElements.push(element.start);
+      } else {
+        return this;
       }
-      return Set.fromJS(simpleElements);
-    } else {
-      return this;
     }
+    return Set.fromJS(simpleElements);
   }
 
   public extent(): PlywoodRange {
     let setType = this.setType;
-    if (hasOwnProperty(typeUpgrades, setType)) {
+    if (hasOwnProp(typeUpgrades, setType)) {
       return this.upgradeType().extent();
     }
-    if (setType !== 'NUMBER_RANGE' && setType !== 'TIME_RANGE' && setType !== 'STRING_RANGE') return null;
+    if (!Range.isRangeType(setType)) return null;
     let elements = this.elements;
     let extent: PlywoodRange = elements[0] || null;
     for (let i = 1; i < elements.length; i++) {
@@ -319,23 +384,8 @@ export class Set implements Instance<SetValue, SetJS> {
   public union(other: Set): Set {
     if (this.empty()) return other;
     if (other.empty()) return this;
-
-    if (this.setType !== other.setType) {
-      throw new TypeError("can not union sets of different types");
-    }
-
-    let newElements: Array<any> = this.elements.slice();
-
-    let otherElements = other.elements;
-    for (let el of otherElements) {
-      if (this.contains(el)) continue;
-      newElements.push(el);
-    }
-
-    return new Set({
-      setType: this.setType,
-      elements: newElements
-    }).unifyElements();
+    if (this.setType !== other.setType) throw new TypeError("can not union sets of different types");
+    return this.changeElements(this.elements.concat(other.elements)).unifyElements();
   }
 
   public intersect(other: Set): Set {
@@ -350,7 +400,7 @@ export class Set implements Instance<SetValue, SetJS> {
     let newElements: Array<any>;
     if (setType === 'NUMBER_RANGE' || setType === 'TIME_RANGE' || setType === 'STRING_RANGE') {
       let otherElements = other.elements;
-      newElements = intersectElements(thisElements, otherElements);
+      newElements = Set.intersectElements(thisElements, otherElements);
     } else {
       newElements = [];
       for (let el of thisElements) {
@@ -359,10 +409,7 @@ export class Set implements Instance<SetValue, SetJS> {
       }
     }
 
-    return new Set({
-      setType: this.setType,
-      elements: newElements
-    });
+    return this.changeElements(newElements);
   }
 
   public overlap(other: Set): boolean {
@@ -381,25 +428,22 @@ export class Set implements Instance<SetValue, SetJS> {
     return false;
   }
 
-  public contains(value: any): boolean {
-    const { setType } = this;
-    if ((setType === 'NUMBER_RANGE' && typeof value === 'number')
-      || (setType === 'TIME_RANGE' && isDate(value))
-      || (setType === 'STRING_RANGE' && typeof value === 'string')) {
-
-      return this.containsWithin(value);
-    }
-    return hasOwnProperty(this.hash, this.keyFn(value));
-
+  public has(value: any): boolean {
+    const key = this.keyFn(value);
+    return hasOwnProp(this.hash, key) && generalEqual(this.hash[key], value);
   }
 
-  public containsWithin(value: any): boolean {
-    let elements = this.elements;
-    for (let k in elements) {
-      if (!hasOwnProperty(elements, k)) continue;
-      if ((<NumberRange>elements[k]).contains(value)) return true;
+  public contains(value: any): boolean {
+    if (value instanceof Set) {
+      return value.elements.every((element) => this.contains(element));
     }
-    return false;
+
+    if (Range.isRangeType(this.setType)) {
+      if (value instanceof Range && this.has(value)) return true; // Shortcut
+      return this.elements.some((element) => (element as PlywoodRange).contains(value));
+    } else {
+      return this.has(value);
+    }
   }
 
   public add(value: any): Set {

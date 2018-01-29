@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2016 Imply Data, Inc.
+ * Copyright 2016-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,13 +19,14 @@ export interface CustomDruidTransform {
   extractionFn: Druid.ExtractionFn;
 }
 
-export type CustomDruidTransforms = Lookup<CustomDruidTransform>;
+export type CustomDruidTransforms = Record<string, CustomDruidTransform>;
 
 
 export interface CustomDruidAggregation {
   aggregation: Druid.Aggregation;
+  postAggregation?: Druid.PostAggregation;
   accessType?: string;
 }
 
-export type CustomDruidAggregations = Lookup<CustomDruidAggregation>;
+export type CustomDruidAggregations = Record<string, CustomDruidAggregation>;
 

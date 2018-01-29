@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2016 Imply Data, Inc.
+ * Copyright 2016-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,19 +14,21 @@
  * limitations under the License.
  */
 
-import { r, ExpressionJS, ExpressionValue, Expression, ChainableUnaryExpression } from './baseExpression';
+import { Dataset, PlywoodValue } from '../datatypes/index';
+import { ChainableUnaryExpression, Expression, ExpressionJS, ExpressionValue } from './baseExpression';
 import { Aggregate } from './mixins/aggregate';
-import { PlywoodValue, Dataset } from '../datatypes/index';
 
 export class QuantileExpression extends ChainableUnaryExpression implements Aggregate {
   static op = "Quantile";
   static fromJS(parameters: ExpressionJS): QuantileExpression {
     let value = ChainableUnaryExpression.jsToValue(parameters);
     value.value = parameters.value || (parameters as any).quantile;
+    value.tuning = parameters.tuning;
     return new QuantileExpression(value);
   }
 
   public value: number;
+  public tuning: string;
 
   constructor(parameters: ExpressionValue) {
     super(parameters, dummyObject);
@@ -34,28 +36,34 @@ export class QuantileExpression extends ChainableUnaryExpression implements Aggr
     this._checkOperandTypes('DATASET');
     this._checkExpressionTypes('NUMBER');
     this.value = parameters.value;
+    this.tuning = parameters.tuning;
     this.type = 'NUMBER';
   }
 
   public valueOf(): ExpressionValue {
     let value = super.valueOf();
     value.value = this.value;
+    value.tuning = this.tuning;
     return value;
   }
 
   public toJS(): ExpressionJS {
     let js = super.toJS();
     js.value = this.value;
+    if (this.tuning) js.tuning = this.tuning;
     return js;
   }
 
   public equals(other: QuantileExpression): boolean {
     return super.equals(other) &&
-      this.value === other.value;
+      this.value === other.value &&
+      this.tuning === other.tuning;
   }
 
   protected _toStringParameters(indent?: int): string[] {
-    return [this.expression.toString(indent), String(this.value)];
+    let params = [this.expression.toString(indent), String(this.value)];
+    if (this.tuning) params.push(this.tuning);
+    return params;
   }
 
   protected _calcChainableUnaryHelper(operandValue: any, expressionValue: any): PlywoodValue {

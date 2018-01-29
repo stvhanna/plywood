@@ -1,27 +1,25 @@
-var druidRequesterFactory = require('plywood-druid-requester').druidRequesterFactory;
-var plywood = require('../../build/plywood');
-var ply = plywood.ply;
-var $ = plywood.$;
-var External = plywood.External;
+let druidRequesterFactory = require('plywood-druid-requester').druidRequesterFactory;
+let plywood = require('../../build/plywood');
+let ply = plywood.ply;
+let $ = plywood.$;
+let External = plywood.External;
 
-var druidRequester = druidRequesterFactory({
+let druidRequester = druidRequesterFactory({
   host: 'localhost:8082' // Where ever your Druid may be
 });
 
 // ----------------------------------
 
-var context = {
+let context = {
   wiki: External.fromJS({
     engine: 'druid',
     source: 'wikipedia',  // The datasource name in Druid
-    timeAttribute: 'time',  // Druid's anonymous time attribute will be called 'time'
-    requester: druidRequester
-  })
+  }, druidRequester)
 };
 
-var ex = ply()
+let ex = ply()
   .apply("wiki",
-    $('wiki').filter($("time").in({
+    $('wiki').filter($("__time").overlap({
       start: new Date("2015-08-26T00:00:00Z"),
       end: new Date("2015-08-27T00:00:00Z")
     }))
@@ -45,8 +43,7 @@ ex.compute(context)
   .then(function(data) {
     // Log the data while converting it to a readable standard
     console.log(JSON.stringify(data.toJS(), null, 2));
-  })
-  .done();
+  });
 
 // ----------------------------------
 

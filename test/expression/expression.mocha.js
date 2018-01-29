@@ -1,6 +1,6 @@
 /*
  * Copyright 2012-2015 Metamarkets Group Inc.
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-let { expect } = require("chai");
+const { expect } = require("chai");
 
 let { testImmutableClass } = require("immutable-class-tester");
 
@@ -70,7 +70,7 @@ describe("Expression", () => {
 
       {
         "operand": { "op": "ref", "name": "time" },
-        "op": "in",
+        "op": "overlap",
         "expression": {
           "op": "literal",
           "value": { "start": new Date("2013-02-26T19:00:00.000Z"), "end": new Date("2013-02-26T22:00:00.000Z") },
@@ -158,6 +158,7 @@ describe("Expression", () => {
       { op: 'average', expression: { op: 'ref', name: 'myVar' } },
       { op: 'countDistinct', expression: { op: 'ref', name: 'myVar' } },
       { op: 'quantile', expression: { op: 'ref', name: 'myVar' }, value: 0.5 },
+      { op: 'quantile', expression: { op: 'ref', name: 'myVar' }, value: 0.5, tuning: 'resolution=400' },
       { op: 'collect', expression: { op: 'ref', name: 'myVar' } },
       { op: 'cast', outputType: 'TIME' },
       { op: 'cast', outputType: 'NUMBER' },
@@ -173,6 +174,8 @@ describe("Expression", () => {
 
       { op: 'match', regexp: 'A[B]' },
       { op: 'match', regexp: '^fu*$' },
+
+      { op: 'extract', regexp: '\\d{3}' },
 
       { op: 'lessThan', expression: { op: 'literal', type: 'TIME', value: new Date('2015-10-10Z') } },
 
@@ -517,9 +520,12 @@ describe("Expression", () => {
               "expression": {
                 "op": "literal",
                 "type": "DATASET",
-                "value": [
-                  {}
-                ]
+                "value": {
+                  "attributes": [],
+                  "data": [
+                    {}
+                  ]
+                }
               },
               "op": "chain"
             },
@@ -561,9 +567,12 @@ describe("Expression", () => {
         "expression": {
           "op": "literal",
           "type": "DATASET",
-          "value": [
-            {}
-          ]
+          "value": {
+            "attributes": [],
+            "data": [
+              {}
+            ]
+          }
         },
         "op": "chain"
       };

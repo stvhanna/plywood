@@ -1,6 +1,6 @@
 /*
  * Copyright 2012-2015 Metamarkets Group Inc.
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-let { expect } = require("chai");
+const { expect } = require("chai");
 
 let plywood = require('../plywood');
 let { Expression, $, ply, r } = plywood;
@@ -68,9 +68,9 @@ describe("expression parser", () => {
         .apply('number_set', "[1, 2, 3]")
         .apply('in_string_set', "$x.in(['a', 'b', 'c'])")
         .apply('in_number_set', "$x.in([1, 2, 3])")
-        .apply('in_number_range', "$x.in(1, 2)")
         .apply('in_date_range', "$x.in(['2015-03-03Z', '2015-10-10Z'])")
         .apply('overlap_set', "$x.overlap(['a', 'b', 'c'])")
+        .apply('overlap_number_range', "$x.overlap(1, 2)")
         .apply('substr', "$x.substr(1, 5)")
         .apply('upper', "$x.transformCase('upperCase')")
         .apply('lower', "$x.transformCase('lowerCase')")
@@ -85,6 +85,7 @@ describe("expression parser", () => {
         .apply('agg_min', "$data.min($price)")
         .apply('agg_max', "$data.max($price)")
         .apply('agg_quantile', "$data.quantile($price, 0.5)")
+        .apply('agg_quantile_tuning', "$data.quantile($price, 0.5, 'resolution=400')")
         .apply('custom_transform', '$city.customTransform("myExtractionFn")')
         .apply('agg_custom', "$data.custom(blah)")
         .apply('agg_customAggregate', "$data.customAggregate(blah)")
@@ -137,9 +138,9 @@ describe("expression parser", () => {
         .apply('number_set', r([1, 2, 3]))
         .apply('in_string_set', $("x").in(['a', 'b', 'c']))
         .apply('in_number_set', $("x").in([1, 2, 3]))
-        .apply('in_number_range', $("x").in(1, 2))
         .apply('in_date_range', $("x").in(["2015-03-03Z", "2015-10-10Z"]))
         .apply('overlap_set', $("x").overlap(['a', 'b', 'c']))
+        .apply('overlap_number_range', $("x").overlap(1, 2))
         .apply('substr', $("x").substr(1, 5))
         .apply('upper', $("x").transformCase('upperCase'))
         .apply('lower', $("x").transformCase('lowerCase'))
@@ -154,6 +155,7 @@ describe("expression parser", () => {
         .apply('agg_min', $("data").min($('price')))
         .apply('agg_max', $("data").max($('price')))
         .apply('agg_quantile', $("data").quantile($('price'), 0.5))
+        .apply('agg_quantile_tuning', $("data").quantile($('price'), 0.5, 'resolution=400'))
         .apply('custom_transform', $('city').customTransform("myExtractionFn"))
         .apply('agg_custom', $("data").customAggregate('blah'))
         .apply('agg_customAggregate', $("data").customAggregate('blah'))

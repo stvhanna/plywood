@@ -1,6 +1,6 @@
 /*
  * Copyright 2012-2015 Metamarkets Group Inc.
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,12 @@
  * limitations under the License.
  */
 
-import { Timezone, Duration } from 'chronoshift';
-import { SQLDialect } from './baseDialect';
+import { Duration, Timezone } from 'chronoshift';
 import { PlyType } from '../types';
+import { SQLDialect } from './baseDialect';
 
 export class MySQLDialect extends SQLDialect {
-  static TIME_BUCKETING: Lookup<string> = {
+  static TIME_BUCKETING: Record<string, string> = {
     "PT1S": "%Y-%m-%d %H:%i:%SZ",
     "PT1M": "%Y-%m-%d %H:%i:00Z",
     "PT1H": "%Y-%m-%d %H:00:00Z",
@@ -29,7 +29,7 @@ export class MySQLDialect extends SQLDialect {
     "P1Y":  "%Y-01-01 00:00:00Z"
   };
 
-  static TIME_PART_TO_FUNCTION: Lookup<string> = {
+  static TIME_PART_TO_FUNCTION: Record<string, string> = {
     SECOND_OF_MINUTE: 'SECOND($$)',
     SECOND_OF_HOUR: '(MINUTE($$)*60+SECOND($$))',
     SECOND_OF_DAY: '((HOUR($$)*60+MINUTE($$))*60+SECOND($$))',
@@ -82,12 +82,12 @@ export class MySQLDialect extends SQLDialect {
   }
 
   public escapeLiteral(name: string): string {
-    if (name === null) return 'NULL';
+    if (name === null) return this.nullConstant();
     return JSON.stringify(name);
   }
 
   public timeToSQL(date: Date): string {
-    if (!date) return 'NULL';
+    if (!date) return this.nullConstant();
     return `TIMESTAMP('${this.dateToSQLDateString(date)}')`;
   }
 
@@ -99,16 +99,8 @@ export class MySQLDialect extends SQLDialect {
     return `LOCATE(${a},${b})>0`;
   }
 
-  public lengthExpression(a: string): string {
-    return `CHAR_LENGTH(${a})`;
-  }
-
   public isNotDistinctFromExpression(a: string, b: string): string {
     return `(${a}<=>${b})`;
-  }
-
-  public regexpExpression(expression: string, regexp: string): string {
-    return `(${expression} REGEXP '${regexp}')`; // ToDo: escape this.regexp
   }
 
   public castExpression(inputType: PlyType, operand: string, cast: string): string {

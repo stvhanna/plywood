@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2016 Imply Data, Inc.
+ * Copyright 2016-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
  */
 
 import { Timezone } from 'chronoshift';
-import { ExpressionValue, Expression } from '../baseExpression';
 import { Environment } from '../../types';
+import { Expression, ExpressionValue } from '../baseExpression';
 
 export class HasTimezone {
   public valueOf: () => ExpressionValue;

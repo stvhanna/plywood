@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-let { expect } = require("chai");
+const { expect } = require("chai");
 
 let plywood = require('../plywood');
 let { $, ply, r, Expression } = plywood;
@@ -86,9 +86,9 @@ describe("TimeFloorExpression", () => {
       expect(hourFloorUTC.alignsWith(ex)).to.equal(false);
     });
 
-    it("works with IN range", () => {
+    it("works with OVERLAP range", () => {
       let ex = Expression.fromJS({
-        op: 'in',
+        op: 'overlap',
         operand: { op: 'ref', name: '_' },
         expression: {
           op: 'literal',
@@ -103,9 +103,9 @@ describe("TimeFloorExpression", () => {
       expect(hourFloorUTC.alignsWith(ex)).to.equal(true);
     });
 
-    it("works fails IN range (bad)", () => {
+    it("works fails OVERLAP range (bad)", () => {
       let ex = Expression.fromJS({
-        op: 'in',
+        op: 'overlap',
         operand: { op: 'ref', name: '_' },
         expression: {
           op: 'literal',
@@ -120,9 +120,9 @@ describe("TimeFloorExpression", () => {
       expect(hourFloorUTC.alignsWith(ex)).to.equal(false);
     });
 
-    it("works with IN set", () => {
+    it("works with OVERLAP set", () => {
       let ex = Expression.fromJS({
-        op: 'in',
+        op: 'overlap',
         operand: { op: 'ref', name: '_' },
         expression: {
           op: 'literal',
@@ -140,9 +140,9 @@ describe("TimeFloorExpression", () => {
       expect(hourFloorUTC.alignsWith(ex)).to.equal(true);
     });
 
-    it("works fails IN set (bad)", () => {
+    it("works fails OVERLAP set (bad)", () => {
       let ex = Expression.fromJS({
-        op: 'in',
+        op: 'overlap',
         operand: { op: 'ref', name: '_' },
         expression: {
           op: 'literal',

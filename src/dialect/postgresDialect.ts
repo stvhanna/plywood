@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-import { Timezone, Duration } from 'chronoshift';
-import { SQLDialect } from './baseDialect';
+import { Duration, Timezone } from 'chronoshift';
 import { PlyType } from '../types';
+import { SQLDialect } from './baseDialect';
 
 export class PostgresDialect extends SQLDialect {
-  static TIME_BUCKETING: Lookup<string> = {
+  static TIME_BUCKETING: Record<string, string> = {
     "PT1S": "second",
     "PT1M": "minute",
     "PT1H": "hour",
@@ -30,7 +30,7 @@ export class PostgresDialect extends SQLDialect {
     "P1Y":  "year"
   };
 
-  static TIME_PART_TO_FUNCTION: Lookup<string> = {
+  static TIME_PART_TO_FUNCTION: Record<string, string> = {
     SECOND_OF_MINUTE: "DATE_PART('second',$$)",
     SECOND_OF_HOUR: "(DATE_PART('minute',$$)*60+DATE_PART('second',$$))",
     SECOND_OF_DAY: "((DATE_PART('hour',$$)*60+DATE_PART('minute',$$))*60+DATE_PART('second',$$))",
@@ -60,7 +60,7 @@ export class PostgresDialect extends SQLDialect {
     YEAR: "DATE_PART('year',$$)"
   };
 
-  static CAST_TO_FUNCTION: Lookup<Lookup<string>> = {
+  static CAST_TO_FUNCTION: Record<string, Record<string, string>> = {
     TIME: {
       NUMBER: 'TO_TIMESTAMP($$::double precision / 1000)'
     },
@@ -82,12 +82,8 @@ export class PostgresDialect extends SQLDialect {
   }
 
   public timeToSQL(date: Date): string {
-    if (!date) return 'NULL';
+    if (!date) return this.nullConstant();
     return `TIMESTAMP '${this.dateToSQLDateString(date)}'`;
-  }
-
-  public conditionalExpression(condition: string, thenPart: string, elsePart: string): string {
-    return `(CASE WHEN ${condition} THEN ${thenPart} ELSE ${elsePart} END)`;
   }
 
   public concatExpression(a: string, b: string): string {
@@ -96,10 +92,6 @@ export class PostgresDialect extends SQLDialect {
 
   public containsExpression(a: string, b: string): string {
     return `POSITION(${a} IN ${b})>0`;
-  }
-
-  public lengthExpression(a: string): string {
-    return `LENGTH(${a})`;
   }
 
   public regexpExpression(expression: string, regexp: string): string {

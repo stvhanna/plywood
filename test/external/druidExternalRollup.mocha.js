@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-let { expect } = require("chai");
+const { expect } = require("chai");
 
 let plywood = require('../plywood');
 let { Expression, External, TimeRange, $, ply, r } = plywood;
@@ -71,7 +71,7 @@ describe("DruidExternal Rollup", () => {
         },
         {
           "name": "delta_hist",
-          "special": "histogram",
+          "nativeType": "approximateHistogram",
           "type": "NUMBER"
         },
         {
@@ -88,14 +88,14 @@ describe("DruidExternal Rollup", () => {
         },
         {
           "name": "user_unique",
-          "special": "unique",
+          "nativeType": "hyperUnique",
           "type": "STRING"
         }
       ],
       allowSelectQueries: true,
-      filter: $("time").in({
-        start: new Date('2015-03-12T00:00:00'),
-        end: new Date('2015-03-19T00:00:00')
+      filter: $("time").overlap({
+        start: new Date('2015-03-12T00:00:00Z'),
+        end: new Date('2015-03-19T00:00:00Z')
       })
     })
   };

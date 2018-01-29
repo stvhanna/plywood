@@ -1,6 +1,6 @@
 /*
  * Copyright 2012-2015 Metamarkets Group Inc.
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,13 @@
  */
 
 import { parseISODate } from 'chronoshift';
+import * as hasOwnProp from 'has-own-prop';
 import { isImmutableClass } from 'immutable-class';
-import { PlyType, DatasetFullType, FullType, PlyTypeSimple } from '../types';
-import { r, Expression, ExpressionValue, ExpressionJS, Alterations, Indexer } from './baseExpression';
+import { getValueType, valueFromJS } from '../datatypes/common';
+import { ComputeFn, Dataset, Datum, PlywoodValue, Set, TimeRange } from '../datatypes/index';
 import { SQLDialect } from '../dialect/baseDialect';
-import { hasOwnProperty } from '../helper/utils';
-import { Dataset, Set, TimeRange, PlywoodValue, ComputeFn, Datum } from '../datatypes/index';
-import { isSetType, valueFromJS, getValueType } from '../datatypes/common';
+import { DatasetFullType, PlyType } from '../types';
+import { Expression, ExpressionJS, ExpressionValue, r } from './baseExpression';
 
 export class LiteralExpression extends Expression {
   static op = "Literal";
@@ -31,7 +31,7 @@ export class LiteralExpression extends Expression {
       op: parameters.op,
       type: parameters.type
     };
-    if (!hasOwnProperty(parameters, 'value')) throw new Error('literal expression must have value');
+    if (!hasOwnProp(parameters, 'value')) throw new Error('literal expression must have value');
     let v: any = parameters.value;
     if (isImmutableClass(v)) {
       value.value = v;
@@ -66,7 +66,7 @@ export class LiteralExpression extends Expression {
     let js = super.toJS();
     if (this.value && this.value.toJS) {
       js.value = this.value.toJS();
-      js.type = isSetType(this.type) ? 'SET' : this.type;
+      js.type = Set.isSetType(this.type) ? 'SET' : this.type;
     } else {
       js.value = this.value;
       if (this.type === 'TIME') js.type = 'TIME';
@@ -100,7 +100,7 @@ export class LiteralExpression extends Expression {
 
   public getSQL(dialect: SQLDialect): string {
     let value = this.value;
-    if (value === null) return 'NULL';
+    if (value === null) return dialect.nullConstant();
 
     switch (this.type) {
       case 'STRING':
@@ -169,18 +169,6 @@ export class LiteralExpression extends Expression {
   public maxPossibleSplitValues(): number {
     const { value } = this;
     return value instanceof Set ? value.size() : 1;
-  }
-
-  public bumpStringLiteralToTime(): Expression {
-    if (this.type !== 'STRING') return this;
-    let parse = parseISODate(this.value, Expression.defaultParserTimezone);
-    if (!parse) throw new Error(`could not parse '${this.value}' as time`);
-    return r(parse);
-  }
-
-  public bumpStringLiteralToSetString(): Expression {
-    if (this.type !== 'STRING') return this;
-    return r(Set.fromJS([this.value]));
   }
 
   public upgradeToType(targetType: PlyType): Expression {

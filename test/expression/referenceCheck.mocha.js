@@ -1,6 +1,6 @@
 /*
  * Copyright 2012-2015 Metamarkets Group Inc.
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-let { expect } = require("chai");
+const { expect } = require("chai");
 
 let plywood = require('../plywood');
 let { External, Dataset, $, i$, ply, r } = plywood;
@@ -426,10 +426,10 @@ describe("reference check", () => {
       expect(ex1.referenceCheck(context).toJS()).to.deep.equal(ex2.toJS());
     });
 
-    it.skip("a join", () => {
+    it("works with join", () => {
       let ex1 = ply()
-        .apply('Data1', $('diamonds').filter($('price').in(105, 305)))
-        .apply('Data2', $('diamonds').filter($('price').in(105, 305).not()))
+        .apply('Data1', $('diamonds').filter($('price').overlap(105, 305)))
+        .apply('Data2', $('diamonds').filter($('price').overlap(105, 305).not()))
         .apply(
           'Cuts',
           $('Data1').split('$cut', 'Cut', 'K1').join($('Data2').split('$cut', 'Cut', 'K2'))
@@ -438,8 +438,8 @@ describe("reference check", () => {
         );
 
       let ex2 = ply()
-        .apply('Data1', $('diamonds', 1, 'DATASET').filter($('price', 'NUMBER').in(105, 305)))
-        .apply('Data2', $('diamonds', 1, 'DATASET').filter($('price', 'NUMBER').in(105, 305).not()))
+        .apply('Data1', $('diamonds', 1, 'DATASET').filter($('price', 'NUMBER').overlap(105, 305)))
+        .apply('Data2', $('diamonds', 1, 'DATASET').filter($('price', 'NUMBER').overlap(105, 305).not()))
         .apply(
           'Cuts',
           $('Data1', 'DATASET').split('$cut:STRING', 'Cut', 'K1').join($('Data2', 'DATASET').split('$cut:STRING', 'Cut', 'K2'))

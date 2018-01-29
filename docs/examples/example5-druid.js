@@ -1,11 +1,11 @@
-var druidRequesterFactory = require('plywood-druid-requester').druidRequesterFactory;
-var plywood = require('../../build/plywood');
-var ply = plywood.ply;
-var $ = plywood.$;
-var External = plywood.External;
-var helper = plywood.helper;
+let druidRequesterFactory = require('plywood-druid-requester').druidRequesterFactory;
+let plywood = require('../../build/plywood');
+let ply = plywood.ply;
+let $ = plywood.$;
+let External = plywood.External;
+let helper = plywood.helper;
 
-var druidRequester = druidRequesterFactory({
+let druidRequester = druidRequesterFactory({
   host: 'localhost:8082' // Where ever your Druid may be
 });
 
@@ -15,24 +15,22 @@ druidRequester = helper.verboseRequesterFactory({
 
 // ----------------------------------
 
-var context = {
+let context = {
   wiki: External.fromJS({
     engine: 'druid',
     source: 'wikipedia',  // The datasource name in Druid
-    timeAttribute: 'time',  // Druid's anonymous time attribute will be called 'time'
-    filter: $("time").in({ start: new Date("2015-09-01T00:00:00Z"), end: new Date("2015-11-01T00:00:00Z") }),
-    requester: druidRequester
-  })
+    filter: $("__time").overlap({ start: new Date("2015-09-01T00:00:00Z"), end: new Date("2015-11-01T00:00:00Z") }),
+  }, druidRequester)
 };
 
-var ex = $('wiki')
+let ex = $('wiki')
   .filter('$region != null and $country == "United States"')
   .split('$region', 'State')
     .apply('Edits', '$wiki.count()')
     .sort('$Edits', 'descending')
     .limit(5)
     .apply('DaysOfWeek',
-      $('wiki').split($("time").timePart('DAY_OF_WEEK', 'America/New_York'), 'DayOfWeek')
+      $('wiki').split($("__time").timePart('DAY_OF_WEEK', 'America/New_York'), 'DayOfWeek')
         .apply('Edits', '$wiki.count()')
         .sort('$DayOfWeek', 'ascending')
     );
@@ -41,8 +39,7 @@ ex.compute(context)
   .then(function(data) {
     // Log the data while converting it to a readable standard
     console.log(JSON.stringify(data.toJS(), null, 2));
-  })
-  .done();
+  });
 
 // ----------------------------------
 

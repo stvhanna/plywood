@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2016 Imply Data, Inc.
+ * Copyright 2016-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-import { r, ExpressionJS, ExpressionValue, Expression, ChainableExpression, CaseType } from './baseExpression';
-import { SQLDialect } from '../dialect/baseDialect';
 import { PlywoodValue } from '../datatypes/index';
+import { SQLDialect } from '../dialect/baseDialect';
+import { CaseType, ChainableExpression, Expression, ExpressionJS, ExpressionValue } from './baseExpression';
 
 export class TransformCaseExpression extends ChainableExpression {
   static UPPER_CASE = 'upperCase';

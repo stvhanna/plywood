@@ -1,6 +1,6 @@
 /*
  * Copyright 2012-2015 Metamarkets Group Inc.
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,11 @@
  * limitations under the License.
  */
 
-import { Timezone, Duration, parseISODate } from 'chronoshift';
+import { Duration, parseISODate, Timezone } from 'chronoshift';
 import { Class, Instance } from 'immutable-class';
-import { Range } from './range';
 import { Expression } from '../expressions/baseExpression';
+import { NumberRange } from './numberRange';
+import { Range } from './range';
 
 export interface TimeRangeValue {
   start: Date;
@@ -124,10 +125,6 @@ export class TimeRange extends Range<Date> implements Instance<TimeRangeValue, T
     return js;
   }
 
-  public toJSON(): TimeRangeJS {
-    return this.toJS();
-  }
-
   public equals(other: TimeRange): boolean {
     return other instanceof TimeRange && this._equalsHelper(other);
   }
@@ -154,6 +151,14 @@ export class TimeRange extends Range<Date> implements Instance<TimeRangeValue, T
 
   public midpoint(): Date {
     return new Date((this.start.valueOf() + this.end.valueOf()) / 2);
+  }
+
+  public changeToNumber(): NumberRange {
+    return new NumberRange({
+      bounds: this.bounds,
+      start: this.start ? this.start.valueOf() : null,
+      end: this.end ? this.end.valueOf() : null
+    });
   }
 
   public isAligned(duration: Duration, timezone: Timezone): boolean {

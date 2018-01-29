@@ -1,10 +1,10 @@
-var plywood = require('plywood');
-var ply = plywood.ply;
-var $ = plywood.$;
-var External = plywood.External;
+let plywood = require('plywood');
+let ply = plywood.ply;
+let $ = plywood.$;
+let External = plywood.External;
 
 // Define an external or two
-var mysqlExternal = External.fromJS({
+let mysqlExternal = External.fromJS({
   engine: 'mysql',
   source: 'wikipedia',
   attributes: [
@@ -15,10 +15,9 @@ var mysqlExternal = External.fromJS({
   ]
 });
 
-var druidExternal = External.fromJS({
+let druidExternal = External.fromJS({
   engine: 'druid',
   source: 'wikipedia',
-  timeAttribute: 'time',
   attributes: [
     { name: 'time', type: 'TIME' },
     { name: 'page', type: 'STRING' },
@@ -28,14 +27,14 @@ var druidExternal = External.fromJS({
 });
 
 // Create an expression
-var ex = ply()
+let ex = ply()
   .apply("wiki",
     $('wiki').filter(
-      $("time").in({
+      $("__time").overlap({
           start: new Date("2015-08-26T00:00:00Z"),
           end: new Date("2015-08-27T00:00:00Z")
         })
-        .and($('language').in(['English', 'Spanish']))
+        .and($('language').is(['English', 'Spanish']))
     )
   )
   .apply('TotalAdded', '$wiki.sum($added)')

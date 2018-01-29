@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2016 Imply Data, Inc.
+ * Copyright 2016-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,14 +14,18 @@
  * limitations under the License.
  */
 
-import { r, ExpressionJS, ExpressionValue, Expression, ChainableUnaryExpression } from './baseExpression';
+import { PlywoodValue, Set } from '../datatypes/index';
 import { SQLDialect } from '../dialect/baseDialect';
-import { PlywoodValue } from '../datatypes/index';
+import { ChainableUnaryExpression, Expression, ExpressionJS, ExpressionValue } from './baseExpression';
 import { TransformCaseExpression } from './transformCaseExpression';
 
 export class ContainsExpression extends ChainableUnaryExpression {
   static NORMAL = 'normal';
   static IGNORE_CASE = 'ignoreCase';
+
+  static caseIndependent(str: string): boolean {
+    return str.toUpperCase() === str.toLowerCase();
+  }
 
   static op = "Contains";
   static fromJS(parameters: ExpressionJS): ContainsExpression {
@@ -34,7 +38,7 @@ export class ContainsExpression extends ChainableUnaryExpression {
 
   constructor(parameters: ExpressionValue) {
     super(parameters, dummyObject);
-    this._checkOperandTypes('STRING', 'SET/STRING');
+    this._checkOperandTypes('STRING');
     this._checkExpressionTypes('STRING');
 
     let { compare } = parameters;
@@ -71,11 +75,13 @@ export class ContainsExpression extends ChainableUnaryExpression {
   }
 
   protected _calcChainableUnaryHelper(operandValue: any, expressionValue: any): PlywoodValue {
+    let fn: (a: any, b: any) => boolean;
     if (this.compare === ContainsExpression.NORMAL) {
-      return String(operandValue).indexOf(expressionValue) > -1;
+      fn = (a: any, b: any) => String(a).indexOf(b) > -1;
     } else {
-      return String(operandValue).toLowerCase().indexOf(String(expressionValue).toLowerCase()) > -1;
+      fn = (a: any, b: any) => String(a).toLowerCase().indexOf(String(b).toLowerCase()) > -1;
     }
+    return Set.crossBinaryBoolean(operandValue, expressionValue, fn);
   }
 
   protected _getJSChainableUnaryHelper(operandJS: string, expressionJS: string): string {
@@ -96,8 +102,14 @@ export class ContainsExpression extends ChainableUnaryExpression {
     return dialect.containsExpression(expressionSQL, operandSQL);
   }
 
+  public changeCompare(compare: string): ContainsExpression {
+    let value = this.valueOf();
+    value.compare = compare;
+    return new ContainsExpression(value);
+  }
+
   public specialSimplify(): Expression {
-    const { operand, expression } = this;
+    const { operand, expression, compare } = this;
 
     // X.transformCase(tt1).contains(Y.transformCase(tt2))
     if (operand instanceof TransformCaseExpression && expression instanceof TransformCaseExpression) {
@@ -105,6 +117,20 @@ export class ContainsExpression extends ChainableUnaryExpression {
       const { operand: y, transformType: tt2 } = expression;
       if (tt1 === tt2) {
         return x.contains(y, ContainsExpression.IGNORE_CASE);
+      }
+    }
+
+    if (compare === 'ignoreCase') {
+      // X.contains(CaseIndependentLiteral, ignoreCase)
+      const expressionLiteral = expression.getLiteralValue();
+      if (
+        expressionLiteral != null &&
+        (
+          (typeof expressionLiteral === 'string' && ContainsExpression.caseIndependent(expressionLiteral)) ||
+          (expressionLiteral instanceof Set && expressionLiteral.elements.every(ContainsExpression.caseIndependent))
+        )
+      ) {
+        return this.changeCompare('normal');
       }
     }
 

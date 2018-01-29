@@ -1,6 +1,6 @@
 /*
  * Copyright 2012-2015 Metamarkets Group Inc.
- * Copyright 2015-2016 Imply Data, Inc.
+ * Copyright 2015-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -90,10 +90,6 @@ export class NumberRange extends Range<number> implements Instance<NumberRangeVa
     };
     if (this.bounds !== Range.DEFAULT_BOUNDS) js.bounds = this.bounds;
     return js;
-  }
-
-  public toJSON(): NumberRangeJS {
-    return this.toJS();
   }
 
   public equals(other: NumberRange): boolean {

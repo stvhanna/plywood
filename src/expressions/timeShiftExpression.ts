@@ -1,5 +1,5 @@
 /*
- * Copyright 2016-2016 Imply Data, Inc.
+ * Copyright 2016-2017 Imply Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,12 @@
  */
 
 
-import { Timezone, Duration } from 'chronoshift';
-import { r, ExpressionJS, ExpressionValue, Expression, ChainableExpression } from './baseExpression';
-import { HasTimezone } from './mixins/hasTimezone';
-import { SQLDialect } from '../dialect/baseDialect';
-import { PlywoodValue } from '../datatypes/index';
+import { Duration, Timezone } from 'chronoshift';
 import { immutableEqual } from 'immutable-class';
+import { PlywoodValue } from '../datatypes/index';
+import { SQLDialect } from '../dialect/baseDialect';
+import { ChainableExpression, Expression, ExpressionJS, ExpressionValue } from './baseExpression';
+import { HasTimezone } from './mixins/hasTimezone';
 
 export class TimeShiftExpression extends ChainableExpression implements HasTimezone {
   static DEFAULT_STEP = 1;
